@@ -4,6 +4,8 @@
 
 export const HR_SERVICE_UUID = 0x180d;
 export const HR_MEASUREMENT_UUID = 0x2a37;
+const RSC_SERVICE_UUID = 0x1814;
+const RSC_MEASUREMENT_UUID = 0x2a53;
 
 function toDataView(input) {
   if (input instanceof DataView) {
@@ -92,6 +94,7 @@ export class HeartRateClient extends EventTarget {
     this.device = null;
     this.server = null;
     this.hrChar = null;
+    this.rscKeepaliveChar = null;
     this.batteryLevel = null;
     this._isConnecting = false;
     this._userInitiatedDisconnect = false;
@@ -119,7 +122,7 @@ export class HeartRateClient extends EventTarget {
       throw new Error('Web Bluetooth is not supported in this browser.');
     }
     this._emitStatus('requesting', 'Select your heart rate monitor...');
-    const optionalServices = [HR_SERVICE_UUID, 'battery_service'];
+    const optionalServices = [HR_SERVICE_UUID, RSC_SERVICE_UUID, 'battery_service'];
     const requestOptions = acceptAllDevices
       ? { acceptAllDevices: true, optionalServices }
       : { filters: [{ services: [HR_SERVICE_UUID] }], optionalServices };
@@ -148,6 +151,18 @@ export class HeartRateClient extends EventTarget {
       this.hrChar.removeEventListener('characteristicvaluechanged', this._onHrValueChanged);
       this.hrChar.addEventListener('characteristicvaluechanged', this._onHrValueChanged);
       await this._enqueueGatt(() => this.hrChar.startNotifications());
+
+      // Garmin FR 245 Virtual Run unlock: silently subscribe to RSC (0x1814 / 0x2A53) if present
+      // so the watch exits "Ready to pair" and enables its START button when used as an HR-only sensor.
+      await this._enqueueGatt(async () => {
+        try {
+          const rscService = await server.getPrimaryService(RSC_SERVICE_UUID);
+          this.rscKeepaliveChar = await rscService.getCharacteristic(RSC_MEASUREMENT_UUID);
+          await this.rscKeepaliveChar.startNotifications();
+        } catch {
+          this.rscKeepaliveChar = null;
+        }
+      });
 
       this._batteryTimer = setTimeout(() => {
         if (this.isConnected && this.batteryLevel === null) {
@@ -180,6 +195,13 @@ export class HeartRateClient extends EventTarget {
         } catch {
           // Ignore teardown errors.
         }
+      }
+    }
+    if (this.rscKeepaliveChar && this.isConnected) {
+      try {
+        await this.rscKeepaliveChar.stopNotifications();
+      } catch {
+        // Ignore teardown errors.
       }
     }
     const device = this.device;
@@ -267,6 +289,7 @@ export class HeartRateClient extends EventTarget {
     this.device = null;
     this.server = null;
     this.hrChar = null;
+    this.rscKeepaliveChar = null;
     this.batteryLevel = null;
     this._isConnecting = false;
     this._reconnectAttempts = 0;
