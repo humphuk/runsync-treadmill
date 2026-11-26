@@ -2,11 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  QUALITY_PRESETS,
   WORLD_THEMES,
   computeInclinePitchRad,
   computeNextArchDistanceM,
   computeRoadYAtZ,
   computeStrideBobOffset,
+  getQualityPreset,
   updateGhostPacer,
   wrapScrollZ,
 } from '../src/views/threejs-math.js';
@@ -15,9 +17,21 @@ test('WORLD_THEMES provides forest, coastal, and synthwave palettes with require
   for (const key of ['forest', 'coastal', 'synthwave']) {
     const theme = WORLD_THEMES[key];
     assert.ok(theme, `Missing theme ${key}`);
-    assert.ok(theme.skyTop && theme.skyHorizon && theme.fogColor);
+    assert.ok(theme.skyTop && theme.skyMid && theme.skyHorizon && theme.fogColor);
+    assert.ok(theme.hemiSky && theme.hemiGround && theme.sunColor && theme.sunIntensity > 1);
     assert.ok(theme.roadBase && theme.roadStripe && theme.archColor && theme.ghostColor);
   }
+});
+
+test('QUALITY_PRESETS defines low, medium, and high tiers with progressive visual features', () => {
+  const { low, medium, high } = QUALITY_PRESETS;
+  assert.ok(low.sceneryCount < medium.sceneryCount && medium.sceneryCount < high.sceneryCount);
+  assert.equal(low.shadows, false);
+  assert.equal(medium.shadows, false);
+  assert.equal(high.shadows, true);
+  assert.equal(low.particleCount, 0);
+  assert.ok(high.particleCount > 0);
+  assert.equal(getQualityPreset('unknown'), medium);
 });
 
 test('computeInclinePitchRad and computeRoadYAtZ produce positive uphill lift and clamp bounds', () => {

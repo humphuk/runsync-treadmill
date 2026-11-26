@@ -27,7 +27,7 @@ const DEFAULT_SETTINGS = {
   activeView: 'youtube',
   muted: true,
   threeTheme: 'forest',
-  threeQuality: 'low',
+  threeQuality: 'medium',
   threeCameraBob: true,
   ghostEnabled: true,
   ghostPaceSecPerKm: 330,

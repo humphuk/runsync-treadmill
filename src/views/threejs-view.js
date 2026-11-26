@@ -1,24 +1,24 @@
 /**
- * Lightweight Three.js 3D Runner View (Phase 2A) tuned for the Lenovo Duet GPU budget:
- * - devicePixelRatio <= 1, shadowMap disabled, distance fog, < 15 draw calls via InstancedMesh
- * - Stationary camera at z = 0 with pooled scrolling chunks (zero long-run jitter)
- * - 3 offline themes (Forest Trail, Coastal Sunset, Synthwave Grid)
- * - Dynamic incline road pitch, 500 m milestone arches, toggleable stride bob, and Ghost Pacer
+ * Bright, multi-tier Three.js 3D Runner View (Phase 2A):
+ * - Low (battery/max FPS), Medium (Lenovo Duet default), High (Gaming PC Ultra w/ shadows & particles)
+ * - Hemisphere + front-3/4 sunlight + ACESFilmicToneMapping for crisp, sunlit scenes
+ * - 3 live-switchable themes (Forest Trail, Coastal Sunset, Synthwave Grid)
+ * - Dynamic incline pitch, 500 m milestone arches, toggleable stride bob, and Ghost Pacer
  */
 
 import * as THREE from '../../vendor/three.module.min.js';
 import {
+  QUALITY_PRESETS,
   WORLD_THEMES,
   computeInclinePitchRad,
   computeNextArchDistanceM,
   computeStrideBobOffset,
+  getQualityPreset,
   updateGhostPacer,
   wrapScrollZ,
 } from './threejs-math.js';
 
-const MAX_SCENERY = 180;
-const SCROLL_SPAN_M = 240;
-const SCROLL_NEAR_Z = 18;
+const SCROLL_NEAR_Z = 20;
 const ROAD_TILE_METERS = 10;
 
 function seededRand(seed) {
@@ -33,7 +33,8 @@ function createSkyTexture(theme) {
   const ctx = canvas.getContext('2d');
   const grad = ctx.createLinearGradient(0, 0, 0, 256);
   grad.addColorStop(0, theme.skyTop);
-  grad.addColorStop(0.68, theme.skyHorizon);
+  grad.addColorStop(0.48, theme.skyMid);
+  grad.addColorStop(0.84, theme.skyHorizon);
   grad.addColorStop(1, theme.fogColor);
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, 4, 256);
@@ -42,39 +43,167 @@ function createSkyTexture(theme) {
   return tex;
 }
 
-function createRoadTexture(theme) {
+function createSunDiscTexture(theme) {
   const canvas = document.createElement('canvas');
   canvas.width = 256;
   canvas.height = 256;
   const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, 256, 256);
 
-  ctx.fillStyle = theme.roadBase;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(128, 128, 120, 0, Math.PI * 2);
+  ctx.clip();
+
+  const grad = ctx.createLinearGradient(0, 8, 0, 248);
+  if (theme.key === 'synthwave') {
+    grad.addColorStop(0, '#fde047');
+    grad.addColorStop(0.5, theme.sunDiscColor);
+    grad.addColorStop(1, '#db2777');
+  } else {
+    grad.addColorStop(0, '#ffffff');
+    grad.addColorStop(0.65, theme.sunDiscColor);
+    grad.addColorStop(1, theme.sunHaloColor);
+  }
+  ctx.fillStyle = grad;
   ctx.fillRect(0, 0, 256, 256);
 
-  // Subtle surface grain
-  ctx.fillStyle = 'rgba(255,255,255,0.03)';
-  for (let i = 0; i < 90; i += 1) {
-    const rx = seededRand(i + 1) * 256;
-    const ry = seededRand(i + 91) * 256;
-    ctx.fillRect(rx, ry, 3, 4);
+  if (theme.key === 'synthwave') {
+    ctx.globalCompositeOperation = 'destination-out';
+    for (let i = 0; i < 6; i += 1) {
+      const y = 136 + i * 20;
+      const h = 3 + i * 1.6;
+      ctx.fillRect(0, y, 256, h);
+    }
+  }
+  ctx.restore();
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+function createSunHaloTexture(theme) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+  const grad = ctx.createRadialGradient(128, 128, 18, 128, 128, 128);
+  grad.addColorStop(0, theme.sunHaloColor);
+  grad.addColorStop(0.4, `${theme.sunHaloColor}66`);
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 256, 256);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+function createRoadTexture(theme, spanM) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 512;
+  const ctx = canvas.getContext('2d');
+
+  ctx.fillStyle = theme.roadBase;
+  ctx.fillRect(0, 0, 512, 512);
+
+  // Surface texture grain / boardwalk planks
+  if (theme.key === 'coastal') {
+    ctx.fillStyle = 'rgba(255,255,255,0.05)';
+    for (let y = 0; y < 512; y += 32) {
+      ctx.fillRect(0, y, 512, 3);
+    }
+  } else {
+    ctx.fillStyle = 'rgba(255,255,255,0.04)';
+    for (let i = 0; i < 240; i += 1) {
+      const rx = seededRand(i + 1) * 512;
+      const ry = seededRand(i + 241) * 512;
+      ctx.fillRect(rx, ry, 4, 6);
+    }
   }
 
-  // Shoulder lines
+  // Bright edge shoulders
   ctx.fillStyle = theme.roadShoulder;
-  ctx.fillRect(10, 0, 8, 256);
-  ctx.fillRect(238, 0, 8, 256);
+  ctx.fillRect(18, 0, 14, 512);
+  ctx.fillRect(480, 0, 14, 512);
 
   // Center dashed line
   ctx.fillStyle = theme.roadStripe;
-  ctx.fillRect(124, 20, 8, 96);
-  ctx.fillRect(124, 148, 8, 96);
+  ctx.fillRect(248, 34, 16, 190);
+  ctx.fillRect(248, 290, 16, 190);
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.wrapS = THREE.ClampToEdgeWrapping;
   tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(1, SCROLL_SPAN_M / ROAD_TILE_METERS);
+  tex.repeat.set(1, spanM / ROAD_TILE_METERS);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
+}
+
+function createSynthGridTexture(theme, spanM) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = theme.terrainPrimary;
+  ctx.fillRect(0, 0, 256, 256);
+
+  ctx.strokeStyle = theme.terrainSecondary;
+  ctx.lineWidth = 4;
+  ctx.strokeRect(2, 2, 252, 252);
+  ctx.globalAlpha = 0.45;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(128, 0);
+  ctx.lineTo(128, 256);
+  ctx.moveTo(0, 128);
+  ctx.lineTo(256, 128);
+  ctx.stroke();
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(22, spanM / 8);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+function createOceanTexture(spanM) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#0891b2';
+  ctx.fillRect(0, 0, 256, 256);
+
+  ctx.fillStyle = 'rgba(224, 242, 254, 0.28)';
+  for (let i = 0; i < 28; i += 1) {
+    const x = seededRand(i * 11 + 3) * 210;
+    const y = seededRand(i * 11 + 7) * 246;
+    ctx.fillRect(x, y, 36, 4);
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(8, spanM / 14);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+function createParticleTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 64;
+  canvas.height = 64;
+  const ctx = canvas.getContext('2d');
+  const grad = ctx.createRadialGradient(32, 32, 2, 32, 32, 32);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.5, 'rgba(255,255,255,0.55)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(canvas);
 }
 
 function createArchSignTexture(labelText, accentColor) {
@@ -83,7 +212,7 @@ function createArchSignTexture(labelText, accentColor) {
   canvas.height = 128;
   const ctx = canvas.getContext('2d');
 
-  ctx.fillStyle = '#0b1020';
+  ctx.fillStyle = '#0f172a';
   ctx.fillRect(0, 0, 512, 128);
   ctx.strokeStyle = accentColor;
   ctx.lineWidth = 8;
@@ -103,14 +232,14 @@ function createArchSignTexture(labelText, accentColor) {
 export class ThreeJsView extends EventTarget {
   constructor({
     theme = 'forest',
-    quality = 'low',
+    quality = 'medium',
     cameraBob = true,
     ghostEnabled = true,
     ghostPaceSecPerKm = 330,
   } = {}) {
     super();
     this.themeKey = WORLD_THEMES[theme] ? theme : 'forest';
-    this.quality = quality === 'medium' ? 'medium' : 'low';
+    this.quality = QUALITY_PRESETS[quality] ? quality : 'medium';
     this.cameraBob = Boolean(cameraBob);
     this.ghostEnabled = Boolean(ghostEnabled);
     this.ghostPaceSecPerKm = ghostPaceSecPerKm;
@@ -138,6 +267,7 @@ export class ThreeJsView extends EventTarget {
     this._ghostPhase = 0;
     this._lastGhostEmitMs = 0;
     this._nextArchM = 500;
+    this._spanM = 285;
     this._disposables = [];
 
     // Three.js handles
@@ -145,17 +275,35 @@ export class ThreeJsView extends EventTarget {
     this.scene = null;
     this.camera = null;
     this.worldGroup = null;
-    this.ambientLight = null;
+    this.hemiLight = null;
     this.sunLight = null;
-    this.sunMesh = null;
+    this.rimLight = null;
+    this.sunDiscMesh = null;
+    this.sunHaloMesh = null;
+    this.sunDiscTex = null;
+    this.sunHaloTex = null;
+    this.skyTex = null;
+
     this.roadMesh = null;
     this.roadTex = null;
-    this.skyTex = null;
     this.terrainGeo = null;
     this.terrainMesh = null;
+    this.synthGridTex = null;
+    this.oceanMesh = null;
+    this.oceanTex = null;
+
     this.trunkMesh = null;
-    this.canopyMesh = null;
+    this.canopyLowerMesh = null;
+    this.canopyUpperMesh = null;
     this.propMesh = null;
+    this.grassMesh = null;
+    this.cloudMesh = null;
+    this.mountainGroup = null;
+    this.mountainMat = null;
+    this.mountainCapMat = null;
+    this.particlePoints = null;
+    this.particlePositions = null;
+
     this.archGroup = null;
     this.archSignMat = null;
     this.archSignTex = null;
@@ -163,7 +311,11 @@ export class ThreeJsView extends EventTarget {
     this.ghostGroup = null;
     this.ghostParts = null;
     this.ghostMat = null;
+    this.ghostRingMat = null;
+
     this._scenerySlots = [];
+    this._grassSlots = [];
+    this._cloudSlots = [];
     this._dummy = new THREE.Object3D();
   }
 
@@ -225,7 +377,15 @@ export class ThreeJsView extends EventTarget {
     this.scene = null;
     this.camera = null;
     this.worldGroup = null;
+    this.oceanMesh = null;
+    this.grassMesh = null;
+    this.cloudMesh = null;
+    this.mountainGroup = null;
+    this.particlePoints = null;
+    this.particlePositions = null;
     this._scenerySlots = [];
+    this._grassSlots = [];
+    this._cloudSlots = [];
     if (this.container) {
       this.container.innerHTML = '';
       this.container = null;
@@ -246,17 +406,18 @@ export class ThreeJsView extends EventTarget {
     }
   }
 
-  setQuality(quality) {
-    this.quality = quality === 'medium' ? 'medium' : 'low';
-    if (!this.renderer) {
+  async setQuality(quality) {
+    const normalized = QUALITY_PRESETS[quality] ? quality : 'medium';
+    if (normalized === this.quality) {
       return;
     }
-    this.renderer.setPixelRatio(this.quality === 'medium' ? Math.min(window.devicePixelRatio || 1, 1) : 0.85);
-    const activeCount = this.quality === 'medium' ? MAX_SCENERY : 100;
-    if (this.trunkMesh) this.trunkMesh.count = activeCount;
-    if (this.canopyMesh) this.canopyMesh.count = activeCount;
-    if (this.propMesh) this.propMesh.count = activeCount;
-    this._handleResize();
+    this.quality = normalized;
+    if (this._mounted && this.container) {
+      const targetContainer = this.container;
+      const paused = this.manualPaused;
+      await this.unmount();
+      await this.mount(targetContainer, { manualPaused: paused });
+    }
   }
 
   setCameraBob(enabled) {
@@ -286,16 +447,39 @@ export class ThreeJsView extends EventTarget {
     return resource;
   }
 
+  _makeLitMaterial(preset, params = {}) {
+    if (preset.useStandardMaterials) {
+      return this._track(
+        new THREE.MeshStandardMaterial({
+          roughness: 0.78,
+          metalness: 0.06,
+          ...params,
+        }),
+      );
+    }
+    return this._track(new THREE.MeshLambertMaterial(params));
+  }
+
   _initScene(stage) {
+    const preset = getQualityPreset(this.quality);
+    const spanM = Math.max(240, preset.farClip);
+    this._spanM = spanM;
+
     const width = Math.max(320, stage.clientWidth || window.innerWidth);
     const height = Math.max(200, stage.clientHeight || window.innerHeight);
 
     const renderer = new THREE.WebGLRenderer({
-      antialias: this.quality === 'medium',
-      powerPreference: 'low-power',
+      antialias: preset.antialias,
+      powerPreference: preset.key === 'high' ? 'high-performance' : 'default',
     });
-    renderer.shadowMap.enabled = false;
-    renderer.setPixelRatio(this.quality === 'medium' ? Math.min(window.devicePixelRatio || 1, 1) : 0.85);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.25;
+    renderer.shadowMap.enabled = preset.shadows;
+    if (preset.shadows) {
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    }
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, preset.maxDpr));
     renderer.setSize(width, height, false);
     renderer.domElement.className = 'three-canvas';
     stage.appendChild(renderer.domElement);
@@ -304,85 +488,148 @@ export class ThreeJsView extends EventTarget {
     const scene = new THREE.Scene();
     this.scene = scene;
 
-    const camera = new THREE.PerspectiveCamera(62, width / height, 0.2, 240);
+    const camera = new THREE.PerspectiveCamera(62, width / height, 0.2, spanM + 40);
     camera.position.set(0, 1.65, 0);
-    camera.lookAt(0, 1.45, -40);
+    camera.lookAt(0, 1.45, -45);
     this.camera = camera;
 
-    const ambientLight = new THREE.AmbientLight('#ffffff', 0.85);
-    scene.add(ambientLight);
-    this.ambientLight = ambientLight;
+    // Bright daylight / twilight hemisphere + front-3/4 sun
+    const hemiLight = new THREE.HemisphereLight('#e0f2fe', '#3f6212', 1.15);
+    scene.add(hemiLight);
+    this.hemiLight = hemiLight;
 
-    const sunLight = new THREE.DirectionalLight('#ffffff', 0.95);
-    sunLight.position.set(16, 28, -40);
+    const sunLight = new THREE.DirectionalLight('#fff7ed', 2.2);
+    sunLight.position.set(28, 46, 36);
+    sunLight.target.position.set(0, 0, -35);
     scene.add(sunLight);
+    scene.add(sunLight.target);
+    if (preset.shadows) {
+      sunLight.castShadow = true;
+      sunLight.shadow.mapSize.set(preset.shadowMapSize, preset.shadowMapSize);
+      sunLight.shadow.camera.left = -45;
+      sunLight.shadow.camera.right = 45;
+      sunLight.shadow.camera.top = 45;
+      sunLight.shadow.camera.bottom = -45;
+      sunLight.shadow.camera.near = 5;
+      sunLight.shadow.camera.far = 180;
+      sunLight.shadow.bias = -0.0005;
+    }
     this.sunLight = sunLight;
 
-    const sunGeo = this._track(new THREE.CircleGeometry(22, 28));
-    const sunMat = this._track(new THREE.MeshBasicMaterial({ color: '#fff2cc', fog: false }));
-    const sunMesh = new THREE.Mesh(sunGeo, sunMat);
-    sunMesh.position.set(0, 24, -198);
-    scene.add(sunMesh);
-    this.sunMesh = sunMesh;
+    if (preset.key === 'high') {
+      const rimLight = new THREE.DirectionalLight('#bae6fd', 0.55);
+      rimLight.position.set(-22, 18, -50);
+      scene.add(rimLight);
+      this.rimLight = rimLight;
+    }
+
+    // Radiant Sun Disc + Halo
+    const sunHaloGeo = this._track(new THREE.PlaneGeometry(92, 92));
+    const sunHaloMat = this._track(
+      new THREE.MeshBasicMaterial({
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        fog: false,
+      }),
+    );
+    const sunHaloMesh = new THREE.Mesh(sunHaloGeo, sunHaloMat);
+    sunHaloMesh.position.set(0, 30, -(spanM - 15));
+    scene.add(sunHaloMesh);
+    this.sunHaloMesh = sunHaloMesh;
+
+    const sunDiscGeo = this._track(new THREE.PlaneGeometry(46, 46));
+    const sunDiscMat = this._track(
+      new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, fog: false }),
+    );
+    const sunDiscMesh = new THREE.Mesh(sunDiscGeo, sunDiscMat);
+    sunDiscMesh.position.set(0, 30, -(spanM - 16));
+    scene.add(sunDiscMesh);
+    this.sunDiscMesh = sunDiscMesh;
 
     const worldGroup = new THREE.Group();
     scene.add(worldGroup);
     this.worldGroup = worldGroup;
 
-    // Road ribbon (6.4m wide, 240m long from z=-222 to +18)
-    const roadGeo = this._track(new THREE.PlaneGeometry(6.4, SCROLL_SPAN_M, 1, 1));
+    // Road ribbon
+    const roadGeo = this._track(new THREE.PlaneGeometry(6.6, spanM, 1, 1));
     roadGeo.rotateX(-Math.PI / 2);
-    const roadMat = this._track(new THREE.MeshLambertMaterial({ color: '#ffffff' }));
+    const roadMat = this._makeLitMaterial(preset, { color: '#ffffff', roughness: 0.86 });
     const roadMesh = new THREE.Mesh(roadGeo, roadMat);
-    roadMesh.position.set(0, 0, SCROLL_NEAR_Z - SCROLL_SPAN_M / 2);
+    roadMesh.position.set(0, 0, SCROLL_NEAR_Z - spanM / 2);
+    roadMesh.receiveShadow = preset.shadows;
     worldGroup.add(roadMesh);
     this.roadMesh = roadMesh;
 
-    // Sculpted low-poly terrain corridor
-    const terrainGeo = this._track(new THREE.PlaneGeometry(180, SCROLL_SPAN_M, 26, 18));
+    // Sculpted terrain corridor
+    const terrainGeo = this._track(
+      new THREE.PlaneGeometry(210, spanM, preset.terrainSegX, preset.terrainSegZ),
+    );
     terrainGeo.rotateX(-Math.PI / 2);
     const posAttr = terrainGeo.attributes.position;
     const colors = new Float32Array(posAttr.count * 3);
     terrainGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    const terrainMat = this._track(
-      new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }),
-    );
+    const terrainMat = this._makeLitMaterial(preset, {
+      vertexColors: true,
+      flatShading: true,
+      roughness: 0.92,
+    });
     const terrainMesh = new THREE.Mesh(terrainGeo, terrainMat);
-    terrainMesh.position.set(0, -0.06, SCROLL_NEAR_Z - SCROLL_SPAN_M / 2);
+    terrainMesh.position.set(0, -0.06, SCROLL_NEAR_Z - spanM / 2);
+    terrainMesh.receiveShadow = preset.shadows;
     worldGroup.add(terrainMesh);
     this.terrainGeo = terrainGeo;
     this.terrainMesh = terrainMesh;
 
-    // Pooled instanced scenery (trees/pylons + boulders/crystals)
-    const trunkGeo = this._track(new THREE.CylinderGeometry(0.16, 0.24, 2.2, 5));
-    const trunkMat = this._track(new THREE.MeshLambertMaterial({ color: '#ffffff' }));
-    this.trunkMesh = new THREE.InstancedMesh(trunkGeo, trunkMat, MAX_SCENERY);
+    // Dedicated shimmering ocean plane (shown in Coastal theme)
+    const oceanGeo = this._track(new THREE.PlaneGeometry(110, spanM, 1, 1));
+    oceanGeo.rotateX(-Math.PI / 2);
+    const oceanMat = this._makeLitMaterial(preset, {
+      color: '#ffffff',
+      roughness: 0.25,
+      metalness: 0.15,
+    });
+    const oceanMesh = new THREE.Mesh(oceanGeo, oceanMat);
+    oceanMesh.position.set(59.6, -0.14, SCROLL_NEAR_Z - spanM / 2);
+    oceanMesh.receiveShadow = preset.shadows;
+    worldGroup.add(oceanMesh);
+    this.oceanMesh = oceanMesh;
 
-    const canopyGeo = this._track(new THREE.ConeGeometry(1.15, 3.2, 5));
-    const canopyMat = this._track(new THREE.MeshLambertMaterial({ color: '#ffffff' }));
-    this.canopyMesh = new THREE.InstancedMesh(canopyGeo, canopyMat, MAX_SCENERY);
+    // Pooled instanced scenery (trunks + 2-tier canopies + props)
+    const count = preset.sceneryCount;
+    const trunkGeo = this._track(new THREE.CylinderGeometry(0.16, 0.25, 2.2, 6));
+    const trunkMat = this._makeLitMaterial(preset, { color: '#ffffff' });
+    this.trunkMesh = new THREE.InstancedMesh(trunkGeo, trunkMat, count);
 
-    const propGeo = this._track(new THREE.DodecahedronGeometry(0.58, 0));
-    const propMat = this._track(new THREE.MeshLambertMaterial({ color: '#ffffff' }));
-    this.propMesh = new THREE.InstancedMesh(propGeo, propMat, MAX_SCENERY);
+    const lowerGeo = this._track(new THREE.ConeGeometry(1.28, 2.5, 6));
+    const lowerMat = this._makeLitMaterial(preset, { color: '#ffffff' });
+    this.canopyLowerMesh = new THREE.InstancedMesh(lowerGeo, lowerMat, count);
 
-    const activeCount = this.quality === 'medium' ? MAX_SCENERY : 100;
-    this.trunkMesh.count = activeCount;
-    this.canopyMesh.count = activeCount;
-    this.propMesh.count = activeCount;
+    const upperGeo = this._track(new THREE.ConeGeometry(0.92, 2.4, 6));
+    const upperMat = this._makeLitMaterial(preset, { color: '#ffffff' });
+    this.canopyUpperMesh = new THREE.InstancedMesh(upperGeo, upperMat, count);
 
-    worldGroup.add(this.trunkMesh);
-    worldGroup.add(this.canopyMesh);
-    worldGroup.add(this.propMesh);
+    const propGeo = this._track(new THREE.DodecahedronGeometry(0.56, 0));
+    const propMat = this._makeLitMaterial(preset, { color: '#ffffff' });
+    this.propMesh = new THREE.InstancedMesh(propGeo, propMat, count);
+
+    if (preset.shadows) {
+      this.trunkMesh.castShadow = true;
+      this.canopyLowerMesh.castShadow = true;
+      this.canopyUpperMesh.castShadow = true;
+      this.propMesh.castShadow = true;
+    }
+
+    worldGroup.add(this.trunkMesh, this.canopyLowerMesh, this.canopyUpperMesh, this.propMesh);
 
     this._scenerySlots = [];
-    for (let i = 0; i < MAX_SCENERY; i += 1) {
+    for (let i = 0; i < count; i += 1) {
       const side = i % 2 === 0 ? -1 : 1;
-      const distX = 5.6 + seededRand(i * 3 + 1) * 32;
-      const z = SCROLL_NEAR_Z - (i / MAX_SCENERY) * SCROLL_SPAN_M - seededRand(i * 3 + 2) * 2.5;
-      const scale = 0.75 + seededRand(i * 3 + 3) * 0.95;
+      const distX = 5.4 + seededRand(i * 3 + 1) * 40;
+      const z = SCROLL_NEAR_Z - (i / count) * spanM - seededRand(i * 3 + 2) * 2.5;
+      const scale = 0.78 + seededRand(i * 3 + 3) * 0.95;
       const propSide = i % 2 === 0 ? 1 : -1;
-      const propX = propSide * (4.8 + seededRand(i * 5 + 4) * 14);
+      const propX = propSide * (4.6 + seededRand(i * 5 + 4) * 16);
       this._scenerySlots.push({
         side,
         x: side * distX,
@@ -390,38 +637,151 @@ export class ThreeJsView extends EventTarget {
         scale,
         altShade: seededRand(i * 7 + 5) > 0.45,
         propX,
-        propZ: z - 1.2,
-        propScale: 0.5 + seededRand(i * 9 + 6) * 0.8,
+        propZ: z - 1.4,
+        propScale: 0.48 + seededRand(i * 9 + 6) * 0.85,
       });
     }
 
-    // 500m Milestone Arch
-    this._buildArch();
-    // Ghost Pacer Runner
-    this._buildGhostPacer();
+    // Medium & High: roadside grass tufts / neon crystals
+    if (preset.grassCount > 0) {
+      const grassGeo = this._track(new THREE.ConeGeometry(0.24, 0.75, 4));
+      const grassMat = this._makeLitMaterial(preset, { color: '#ffffff' });
+      this.grassMesh = new THREE.InstancedMesh(grassGeo, grassMat, preset.grassCount);
+      worldGroup.add(this.grassMesh);
 
+      this._grassSlots = [];
+      for (let i = 0; i < preset.grassCount; i += 1) {
+        const side = i % 2 === 0 ? -1 : 1;
+        this._grassSlots.push({
+          x: side * (3.7 + seededRand(i * 13 + 2) * 4.5),
+          z: SCROLL_NEAR_Z - (i / preset.grassCount) * spanM,
+          scale: 0.65 + seededRand(i * 13 + 7) * 0.85,
+          tilt: (seededRand(i * 13 + 11) - 0.5) * 0.25,
+        });
+      }
+    }
+
+    // Medium & High: distant mountain ridge & drifting sky clouds
+    if (preset.key !== 'low') {
+      this._buildMountains(preset, spanM);
+      this._buildClouds(preset, spanM);
+    }
+
+    // High: sunlit pollen / sea-spray / neon atmospheric particles
+    if (preset.particleCount > 0) {
+      this._buildParticles(preset.particleCount, spanM);
+    }
+
+    this._buildArch(preset);
+    this._buildGhostPacer(preset);
     this._applyTheme();
 
     this._resizeObserver = new ResizeObserver(() => this._handleResize());
     this._resizeObserver.observe(stage);
   }
 
-  _buildArch() {
+  _buildMountains(preset, spanM) {
+    const group = new THREE.Group();
+    const mountainMat = this._makeLitMaterial(preset, { color: '#64748b', flatShading: true });
+    const capMat = this._makeLitMaterial(preset, { color: '#f8fafc', flatShading: true });
+    this.mountainMat = mountainMat;
+    this.mountainCapMat = capMat;
+
+    const peakCount = 15;
+    for (let i = 0; i < peakCount; i += 1) {
+      const x = -175 + (i / (peakCount - 1)) * 350 + (seededRand(i + 50) - 0.5) * 14;
+      const h = 34 + seededRand(i * 3 + 51) * 34;
+      const r = 24 + seededRand(i * 3 + 52) * 18;
+      const z = -(spanM - 48) - seededRand(i * 3 + 53) * 26;
+
+      const body = new THREE.Mesh(this._track(new THREE.ConeGeometry(r, h, 5)), mountainMat);
+      body.position.set(x, h * 0.45, z);
+      group.add(body);
+
+      const cap = new THREE.Mesh(
+        this._track(new THREE.ConeGeometry(r * 0.38, h * 0.36, 5)),
+        capMat,
+      );
+      cap.position.set(x, h * 0.78, z);
+      group.add(cap);
+    }
+
+    this.worldGroup.add(group);
+    this.mountainGroup = group;
+  }
+
+  _buildClouds(preset, spanM) {
+    const geo = this._track(new THREE.DodecahedronGeometry(3.2, 0));
+    const mat = this._track(
+      new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.82 }),
+    );
+    const mesh = new THREE.InstancedMesh(geo, mat, preset.cloudCount);
+    this.scene.add(mesh);
+    this.cloudMesh = mesh;
+
+    this._cloudSlots = [];
+    for (let i = 0; i < preset.cloudCount; i += 1) {
+      this._cloudSlots.push({
+        x: (seededRand(i * 17 + 1) - 0.5) * 180,
+        y: 28 + seededRand(i * 17 + 2) * 24,
+        z: SCROLL_NEAR_Z - (i / preset.cloudCount) * spanM,
+        sx: 1.6 + seededRand(i * 17 + 3) * 2.2,
+        sy: 0.45 + seededRand(i * 17 + 4) * 0.35,
+        sz: 1.1 + seededRand(i * 17 + 5) * 1.4,
+        driftSpeed: 0.4 + seededRand(i * 17 + 6) * 0.8,
+      });
+    }
+  }
+
+  _buildParticles(count, spanM) {
+    const geo = this._track(new THREE.BufferGeometry());
+    const positions = new Float32Array(count * 3);
+    for (let i = 0; i < count; i += 1) {
+      positions[i * 3] = (seededRand(i * 23 + 1) - 0.5) * 38;
+      positions[i * 3 + 1] = 0.6 + seededRand(i * 23 + 2) * 6.5;
+      positions[i * 3 + 2] = SCROLL_NEAR_Z - seededRand(i * 23 + 3) * (spanM * 0.45);
+    }
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const sprite = this._track(createParticleTexture());
+    const mat = this._track(
+      new THREE.PointsMaterial({
+        size: 0.36,
+        map: sprite,
+        color: '#fef08a',
+        transparent: true,
+        opacity: 0.78,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      }),
+    );
+    const pts = new THREE.Points(geo, mat);
+    this.worldGroup.add(pts);
+    this.particlePoints = pts;
+    this.particlePositions = positions;
+  }
+
+  _buildArch(preset) {
     const archGroup = new THREE.Group();
-    const archMat = this._track(new THREE.MeshLambertMaterial({ color: '#38bdf8' }));
+    const archMat = this._makeLitMaterial(preset, { color: '#0ea5e9' });
     this.archMat = archMat;
 
     const pillarGeo = this._track(new THREE.BoxGeometry(0.32, 4.2, 0.32));
     const leftPillar = new THREE.Mesh(pillarGeo, archMat);
-    leftPillar.position.set(-3.45, 2.1, 0);
+    leftPillar.position.set(-3.55, 2.1, 0);
     const rightPillar = new THREE.Mesh(pillarGeo, archMat);
-    rightPillar.position.set(3.45, 2.1, 0);
+    rightPillar.position.set(3.55, 2.1, 0);
 
-    const barGeo = this._track(new THREE.BoxGeometry(7.25, 0.45, 0.32));
+    const barGeo = this._track(new THREE.BoxGeometry(7.45, 0.45, 0.32));
     const bar = new THREE.Mesh(barGeo, archMat);
     bar.position.set(0, 4.15, 0);
 
-    this.archSignTex = this._track(createArchSignTexture('0.5 km', '#38bdf8'));
+    if (preset.shadows) {
+      leftPillar.castShadow = true;
+      rightPillar.castShadow = true;
+      bar.castShadow = true;
+    }
+
+    this.archSignTex = this._track(createArchSignTexture('0.5 km', '#0ea5e9'));
     const signMat = this._track(new THREE.MeshBasicMaterial({ map: this.archSignTex }));
     this.archSignMat = signMat;
     const signGeo = this._track(new THREE.PlaneGeometry(4.0, 0.85));
@@ -433,20 +793,18 @@ export class ThreeJsView extends EventTarget {
     this.archGroup = archGroup;
   }
 
-  _buildGhostPacer() {
+  _buildGhostPacer(preset) {
     const ghostGroup = new THREE.Group();
-    const ghostMat = this._track(
-      new THREE.MeshLambertMaterial({
-        color: '#38bdf8',
-        emissive: '#0ea5e9',
-        emissiveIntensity: 0.45,
-        transparent: true,
-        opacity: 0.82,
-      }),
-    );
+    const ghostMat = this._makeLitMaterial(preset, {
+      color: '#38bdf8',
+      emissive: '#0ea5e9',
+      emissiveIntensity: 0.55,
+      transparent: true,
+      opacity: 0.88,
+    });
     this.ghostMat = ghostMat;
 
-    const head = new THREE.Mesh(this._track(new THREE.SphereGeometry(0.16, 10, 8)), ghostMat);
+    const head = new THREE.Mesh(this._track(new THREE.SphereGeometry(0.16, 12, 10)), ghostMat);
     head.position.set(0, 1.58, 0);
 
     const torso = new THREE.Mesh(this._track(new THREE.BoxGeometry(0.34, 0.56, 0.2)), ghostMat);
@@ -462,7 +820,30 @@ export class ThreeJsView extends EventTarget {
     const legR = new THREE.Mesh(limbGeo, ghostMat);
     legR.position.set(0.11, 0.55, 0);
 
-    ghostGroup.add(head, torso, armL, armR, legL, legR);
+    if (preset.shadows) {
+      head.castShadow = true;
+      torso.castShadow = true;
+      armL.castShadow = true;
+      armR.castShadow = true;
+      legL.castShadow = true;
+      legR.castShadow = true;
+    }
+
+    const ringGeo = this._track(new THREE.RingGeometry(0.45, 0.62, 24));
+    ringGeo.rotateX(-Math.PI / 2);
+    const ringMat = this._track(
+      new THREE.MeshBasicMaterial({
+        color: '#38bdf8',
+        transparent: true,
+        opacity: 0.72,
+        side: THREE.DoubleSide,
+      }),
+    );
+    this.ghostRingMat = ringMat;
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.position.set(0, 0.03, 0);
+
+    ghostGroup.add(head, torso, armL, armR, legL, legR, ring);
     ghostGroup.position.set(1.15, 0, -10);
     this.worldGroup.add(ghostGroup);
     this.ghostGroup = ghostGroup;
@@ -471,43 +852,101 @@ export class ThreeJsView extends EventTarget {
 
   _applyTheme() {
     const theme = WORLD_THEMES[this.themeKey] || WORLD_THEMES.forest;
+    const preset = getQualityPreset(this.quality);
 
     if (this.skyTex) this.skyTex.dispose();
     this.skyTex = this._track(createSkyTexture(theme));
     this.scene.background = this.skyTex;
-    this.scene.fog = new THREE.Fog(theme.fogColor, 48, 205);
+    this.scene.fog = new THREE.Fog(theme.fogColor, preset.fogNear, preset.fogFar);
 
-    this.ambientLight.color.set(theme.ambientColor);
+    this.hemiLight.color.set(theme.hemiSky);
+    this.hemiLight.groundColor.set(theme.hemiGround);
     this.sunLight.color.set(theme.sunColor);
-    this.sunMesh.material.color.set(theme.sunDiscColor);
+    this.sunLight.intensity = theme.sunIntensity;
+
+    if (this.sunDiscTex) this.sunDiscTex.dispose();
+    this.sunDiscTex = this._track(createSunDiscTexture(theme));
+    this.sunDiscMesh.material.map = this.sunDiscTex;
+    this.sunDiscMesh.material.needsUpdate = true;
+
+    if (this.sunHaloTex) this.sunHaloTex.dispose();
+    this.sunHaloTex = this._track(createSunHaloTexture(theme));
+    this.sunHaloMesh.material.map = this.sunHaloTex;
+    this.sunHaloMesh.material.needsUpdate = true;
 
     if (this.roadTex) this.roadTex.dispose();
-    this.roadTex = this._track(createRoadTexture(theme));
+    this.roadTex = this._track(createRoadTexture(theme, this._spanM));
     this.roadMesh.material.map = this.roadTex;
     this.roadMesh.material.needsUpdate = true;
 
+    // Coastal ocean visibility & texture
+    const isCoastal = theme.key === 'coastal';
+    this.oceanMesh.visible = isCoastal;
+    if (isCoastal) {
+      if (this.oceanTex) this.oceanTex.dispose();
+      this.oceanTex = this._track(createOceanTexture(this._spanM));
+      this.oceanMesh.material.map = this.oceanTex;
+      this.oceanMesh.material.needsUpdate = true;
+    }
+
+    // Synthwave grid overlay vs vertex-colored terrain
+    if (theme.key === 'synthwave') {
+      if (this.synthGridTex) this.synthGridTex.dispose();
+      this.synthGridTex = this._track(createSynthGridTexture(theme, this._spanM));
+      this.terrainMesh.material.map = this.synthGridTex;
+      this.terrainMesh.material.emissive?.set('#1e1038');
+    } else {
+      this.terrainMesh.material.map = null;
+      this.terrainMesh.material.emissive?.set('#000000');
+    }
+    this.terrainMesh.material.needsUpdate = true;
+
     this._rebuildTerrainForTheme(theme);
+
+    if (this.mountainMat && this.mountainCapMat) {
+      this.mountainMat.color.set(theme.mountainColor);
+      this.mountainCapMat.color.set(theme.mountainCapColor);
+    }
+
+    if (this.cloudMesh) {
+      this.cloudMesh.material.color.set(theme.cloudColor);
+    }
+
+    if (this.particlePoints) {
+      this.particlePoints.material.color.set(theme.particleColor);
+    }
 
     this.archMat.color.set(theme.archColor);
     this._refreshArchTexture(this._nextArchM, theme.archColor);
 
     this.ghostMat.color.set(theme.ghostColor);
     this.ghostMat.emissive.set(theme.ghostColor);
+    this.ghostRingMat.color.set(theme.ghostColor);
 
-    // Recolor instanced scenery
     const trunkCol = new THREE.Color(theme.trunkColor);
     const canopyCol = new THREE.Color(theme.canopyColor);
     const canopyAltCol = new THREE.Color(theme.canopyAltColor);
     const propCol = new THREE.Color(theme.propColor);
 
-    for (let i = 0; i < MAX_SCENERY; i += 1) {
+    for (let i = 0; i < this._scenerySlots.length; i += 1) {
       this.trunkMesh.setColorAt(i, trunkCol);
-      this.canopyMesh.setColorAt(i, this._scenerySlots[i].altShade ? canopyAltCol : canopyCol);
+      const cCol = this._scenerySlots[i].altShade ? canopyAltCol : canopyCol;
+      this.canopyLowerMesh.setColorAt(i, cCol);
+      this.canopyUpperMesh.setColorAt(i, cCol);
       this.propMesh.setColorAt(i, propCol);
     }
     if (this.trunkMesh.instanceColor) this.trunkMesh.instanceColor.needsUpdate = true;
-    if (this.canopyMesh.instanceColor) this.canopyMesh.instanceColor.needsUpdate = true;
+    if (this.canopyLowerMesh.instanceColor) this.canopyLowerMesh.instanceColor.needsUpdate = true;
+    if (this.canopyUpperMesh.instanceColor) this.canopyUpperMesh.instanceColor.needsUpdate = true;
     if (this.propMesh.instanceColor) this.propMesh.instanceColor.needsUpdate = true;
+
+    if (this.grassMesh) {
+      const grassCol = new THREE.Color(theme.grassColor);
+      for (let i = 0; i < this._grassSlots.length; i += 1) {
+        this.grassMesh.setColorAt(i, grassCol);
+      }
+      if (this.grassMesh.instanceColor) this.grassMesh.instanceColor.needsUpdate = true;
+    }
   }
 
   _rebuildTerrainForTheme(theme) {
@@ -517,6 +956,7 @@ export class ThreeJsView extends EventTarget {
     const secondary = new THREE.Color(theme.terrainSecondary);
     const tmp = new THREE.Color();
     const isCoastal = theme.key === 'coastal';
+    const isSynth = theme.key === 'synthwave';
 
     for (let i = 0; i < pos.count; i += 1) {
       const x = pos.getX(i);
@@ -526,16 +966,19 @@ export class ThreeJsView extends EventTarget {
       let y = 0;
       if (absX > 4.6) {
         if (isCoastal && x > 4.6) {
-          y = -0.18;
+          y = -0.35;
           tmp.copy(secondary);
         } else {
           const edge = (absX - 4.6) / 14;
-          const wave = Math.sin(x * 0.17 + z * 0.08) * 1.4 + Math.cos(z * 0.11) * 0.9;
-          y = Math.min(8.5, Math.max(0.05, edge * 1.6 + wave * Math.min(1, edge)));
-          tmp.copy(primary).lerp(secondary, Math.min(0.65, edge * 0.15));
+          const wave = Math.sin(x * 0.16 + z * 0.08) * 1.6 + Math.cos(z * 0.1) * 1.1;
+          y = Math.min(10.5, Math.max(0.05, edge * 1.7 + wave * Math.min(1, edge)));
+          tmp.copy(isSynth ? new THREE.Color('#ffffff') : primary).lerp(
+            isSynth ? new THREE.Color('#e2e8f0') : secondary,
+            Math.min(0.65, edge * 0.16),
+          );
         }
       } else {
-        tmp.copy(primary);
+        tmp.copy(isSynth ? new THREE.Color('#ffffff') : primary);
       }
       pos.setY(i, y);
       col.setXYZ(i, tmp.r, tmp.g, tmp.b);
@@ -564,55 +1007,110 @@ export class ThreeJsView extends EventTarget {
     const speedMps = speedKph / 3.6;
     const inclinePct = t.inclinePct ?? 0;
 
-    // Smooth incline road tilt (+X rotation raises -Z horizon up)
+    // Smooth incline road tilt
     const targetPitch = computeInclinePitchRad(inclinePct);
     this._pitchRad += (targetPitch - this._pitchRad) * Math.min(1, dt * 4.5);
     this.worldGroup.rotation.x = this._pitchRad;
-    this.sunMesh.position.y = 24 + Math.sin(this._pitchRad) * 65;
 
-    // Scroll road surface towards runner
+    const sunY = 30 + Math.sin(this._pitchRad) * 80;
+    this.sunDiscMesh.position.y = sunY;
+    this.sunHaloMesh.position.y = sunY;
+
+    // Scroll road, ocean, and synthwave grid
     const deltaZ = speedMps * dt;
     if (this.roadTex && deltaZ > 0) {
       this.roadTex.offset.y = (this.roadTex.offset.y + deltaZ / ROAD_TILE_METERS) % 1;
     }
+    if (this.oceanTex && this.oceanMesh.visible) {
+      this.oceanTex.offset.y = (this.oceanTex.offset.y + (deltaZ + dt * 0.8) / 14) % 1;
+    }
+    if (this.synthGridTex && this.themeKey === 'synthwave' && deltaZ > 0) {
+      this.synthGridTex.offset.y = (this.synthGridTex.offset.y + deltaZ / 8) % 1;
+    }
 
-    // Update instanced scenery chunks
-    const activeCount = this.quality === 'medium' ? MAX_SCENERY : 100;
+    // Update instanced trees/pylons/props
     const isCoastal = this.themeKey === 'coastal';
     const dummy = this._dummy;
+    const spanM = this._spanM;
 
-    for (let i = 0; i < activeCount; i += 1) {
+    for (let i = 0; i < this._scenerySlots.length; i += 1) {
       const slot = this._scenerySlots[i];
-      slot.z = wrapScrollZ(slot.z, deltaZ, SCROLL_SPAN_M, SCROLL_NEAR_Z);
-      slot.propZ = wrapScrollZ(slot.propZ, deltaZ, SCROLL_SPAN_M, SCROLL_NEAR_Z);
+      slot.z = wrapScrollZ(slot.z, deltaZ, spanM, SCROLL_NEAR_Z);
+      slot.propZ = wrapScrollZ(slot.propZ, deltaZ, spanM, SCROLL_NEAR_Z);
 
-      // Keep ocean clear on right side in coastal theme
       const effectiveX = isCoastal && slot.x > 4.6 ? -slot.x : slot.x;
-      const baseH = 1.1 * slot.scale;
+      const s = slot.scale;
 
-      dummy.position.set(effectiveX, baseH, slot.z);
+      dummy.position.set(effectiveX, 1.1 * s, slot.z);
       dummy.rotation.set(0, 0, 0);
-      dummy.scale.set(slot.scale, slot.scale, slot.scale);
+      dummy.scale.set(s, s, s);
       dummy.updateMatrix();
       this.trunkMesh.setMatrixAt(i, dummy.matrix);
 
-      dummy.position.set(effectiveX, baseH * 2 + 1.1 * slot.scale, slot.z);
-      dummy.scale.set(slot.scale, slot.scale, slot.scale);
+      dummy.position.set(effectiveX, 2.55 * s, slot.z);
+      dummy.scale.set(s, s, s);
       dummy.updateMatrix();
-      this.canopyMesh.setMatrixAt(i, dummy.matrix);
+      this.canopyLowerMesh.setMatrixAt(i, dummy.matrix);
+
+      dummy.position.set(effectiveX, 3.85 * s, slot.z);
+      dummy.scale.set(s, s, s);
+      dummy.updateMatrix();
+      this.canopyUpperMesh.setMatrixAt(i, dummy.matrix);
 
       const propEffectiveX = isCoastal && slot.propX > 4.6 ? -slot.propX : slot.propX;
-      dummy.position.set(propEffectiveX, 0.35 * slot.propScale, slot.propZ);
+      dummy.position.set(propEffectiveX, 0.34 * slot.propScale, slot.propZ);
       dummy.rotation.set(0.2, i * 0.7, 0.1);
       dummy.scale.set(slot.propScale, slot.propScale, slot.propScale);
       dummy.updateMatrix();
       this.propMesh.setMatrixAt(i, dummy.matrix);
     }
     this.trunkMesh.instanceMatrix.needsUpdate = true;
-    this.canopyMesh.instanceMatrix.needsUpdate = true;
+    this.canopyLowerMesh.instanceMatrix.needsUpdate = true;
+    this.canopyUpperMesh.instanceMatrix.needsUpdate = true;
     this.propMesh.instanceMatrix.needsUpdate = true;
 
-    // Update 500m milestone arch
+    // Roadside grass tufts / crystals (Medium & High)
+    if (this.grassMesh) {
+      for (let i = 0; i < this._grassSlots.length; i += 1) {
+        const g = this._grassSlots[i];
+        g.z = wrapScrollZ(g.z, deltaZ, spanM, SCROLL_NEAR_Z);
+        const gx = isCoastal && g.x > 3.6 ? -g.x : g.x;
+        dummy.position.set(gx, 0.36 * g.scale, g.z);
+        dummy.rotation.set(0, i * 0.5, g.tilt);
+        dummy.scale.set(g.scale, g.scale, g.scale);
+        dummy.updateMatrix();
+        this.grassMesh.setMatrixAt(i, dummy.matrix);
+      }
+      this.grassMesh.instanceMatrix.needsUpdate = true;
+    }
+
+    // Drifting sky clouds (Medium & High)
+    if (this.cloudMesh) {
+      for (let i = 0; i < this._cloudSlots.length; i += 1) {
+        const c = this._cloudSlots[i];
+        c.z = wrapScrollZ(c.z, deltaZ * 0.18 + dt * c.driftSpeed, spanM, SCROLL_NEAR_Z);
+        dummy.position.set(c.x, c.y, c.z);
+        dummy.rotation.set(0, i * 0.4, 0);
+        dummy.scale.set(c.sx, c.sy, c.sz);
+        dummy.updateMatrix();
+        this.cloudMesh.setMatrixAt(i, dummy.matrix);
+      }
+      this.cloudMesh.instanceMatrix.needsUpdate = true;
+    }
+
+    // Atmospheric particles (High)
+    if (this.particlePoints && this.particlePositions) {
+      const pSpan = spanM * 0.45;
+      const pPos = this.particlePositions;
+      for (let i = 0; i < pPos.length; i += 3) {
+        pPos[i] += Math.sin(nowMs * 0.001 + i) * 0.006;
+        pPos[i + 1] += Math.cos(nowMs * 0.0013 + i) * 0.004;
+        pPos[i + 2] = wrapScrollZ(pPos[i + 2], deltaZ + dt * 0.5, pSpan, SCROLL_NEAR_Z);
+      }
+      this.particlePoints.geometry.attributes.position.needsUpdate = true;
+    }
+
+    // 500m Milestone Arch
     const runnerDistanceM = t.distanceM ?? 0;
     const nextArch = computeNextArchDistanceM(runnerDistanceM, 500);
     if (nextArch !== this._nextArchM) {
@@ -621,10 +1119,10 @@ export class ThreeJsView extends EventTarget {
       this._refreshArchTexture(nextArch, theme.archColor);
     }
     const archZ = -(this._nextArchM - runnerDistanceM);
-    this.archGroup.visible = archZ >= -210 && archZ <= 15;
+    this.archGroup.visible = archZ >= -(spanM - 30) && archZ <= 15;
     this.archGroup.position.set(0, 0, archZ);
 
-    // Update Ghost Pacer
+    // Ghost Pacer
     const ghost = updateGhostPacer({
       runnerDistanceM,
       targetPaceSecPerKm: this.ghostPaceSecPerKm,
@@ -658,7 +1156,7 @@ export class ThreeJsView extends EventTarget {
       );
     }
 
-    // Subtle cadence-synced camera bob
+    // Stride camera bob
     const cadenceHz = Math.max(1.2, (t.cadenceSpm || 165) / 120);
     if (speedKph >= 0.5 && !this.manualPaused) {
       this._stridePhase += dt * cadenceHz * Math.PI * 2;
