@@ -1,0 +1,19 @@
+{
+  "name": "RunSync Treadmill",
+  "short_name": "RunSync",
+  "description": "Smart BLE treadmill HUD, speed-synced POV video, and .FIT activity recorder for Lenovo Duet.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "landscape",
+  "theme_color": "#0b1020",
+  "background_color": "#0b1020",
+  "icons": [
+    {
+      "src": "./assets/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

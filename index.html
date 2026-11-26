@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="referrer" content="strict-origin-when-cross-origin" />
+  <meta name="theme-color" content="#0b1020" />
+  <title>RunSync — Smart Treadmill</title>
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="icon" type="image/svg+xml" href="./assets/icon.svg" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <!-- Full-bleed View Canvas -->
+    <main id="view-stage" class="view-stage" aria-label="Running viewport"></main>
+
+    <!-- Translucent Top Control Bar -->
+    <header class="top-bar">
+      <div class="top-left">
+        <span class="brand-pill">
+          <span class="brand-dot"></span>
+          RunSync
+        </span>
+        <button type="button" id="chip-rsc" class="status-chip" title="Connect Zwift RunPod or Garmin Watch">
+          <span class="chip-dot"></span>
+          <span id="chip-rsc-label">Pod: Off</span>
+        </button>
+        <button type="button" id="chip-hr" class="status-chip" title="Connect BT HR Chest Strap or Watch">
+          <span class="chip-dot"></span>
+          <span id="chip-hr-label">HR: Off</span>
+        </button>
+        <span id="rate-pill" class="rate-pill" title="Current video playback rate">1.00×</span>
+      </div>
+
+      <div class="top-right">
+        <div class="segmented" role="group" aria-label="View engine">
+          <button type="button" id="btn-view-youtube" class="seg-btn active">YouTube</button>
+          <button type="button" id="btn-view-local" class="seg-btn">Local MP4</button>
+        </div>
+        <button type="button" id="btn-mute" class="icon-btn" title="Toggle video mute">Muted</button>
+        <button type="button" id="btn-lock-base" class="icon-btn" title="Lock current speed as 1.0x video speed">Lock 1.0×</button>
+        <button type="button" id="btn-drawer-toggle" class="icon-btn btn-accent">Setup</button>
+      </div>
+    </header>
+
+    <!-- Optional HR Zone Strip -->
+    <div id="hr-zone-bar" class="hr-zone-bar hidden" aria-label="Heart rate zone bar">
+      <div class="hr-zone-seg" data-zone="1">Z1</div>
+      <div class="hr-zone-seg" data-zone="2">Z2</div>
+      <div class="hr-zone-seg" data-zone="3">Z3</div>
+      <div class="hr-zone-seg" data-zone="4">Z4</div>
+      <div class="hr-zone-seg" data-zone="5">Z5</div>
+    </div>
+
+    <!-- Always-visible Bottom Telemetry HUD -->
+    <footer class="bottom-hud" aria-label="Live running telemetry">
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <span class="metric-label">Pace</span>
+          <span class="metric-value"><span id="hud-pace">--:--</span><small>/km</small></span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">Speed</span>
+          <span class="metric-value"><span id="hud-speed">0.0</span><small>km/h</small></span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">Heart Rate</span>
+          <span class="metric-value">
+            <span id="hud-hr">--</span><small>bpm</small>
+            <span id="hud-hr-zone" class="zone-badge hidden">Z1</span>
+          </span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">Cadence</span>
+          <span class="metric-value"><span id="hud-cadence">--</span><small>spm</small></span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">Distance</span>
+          <span class="metric-value"><span id="hud-distance">0.00</span><small>km</small></span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">Time</span>
+          <span class="metric-value"><span id="hud-time">00:00</span></span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">Elev</span>
+          <span class="metric-value">+<span id="hud-elev">0</span><small>m</small></span>
+        </div>
+      </div>
+
+      <div class="hud-actions">
+        <div class="incline-pill" aria-label="Manual incline adjustment">
+          <button type="button" id="btn-inc-down" class="inc-btn" aria-label="Decrease incline">−</button>
+          <div class="inc-readout">
+            <span class="metric-label">Incline</span>
+            <span id="hud-incline" class="inc-value">0.0%</span>
+          </div>
+          <button type="button" id="btn-inc-up" class="inc-btn" aria-label="Increase incline">+</button>
+        </div>
+
+        <button type="button" id="btn-run-toggle" class="btn btn-start">Start</button>
+        <button type="button" id="btn-run-finish" class="btn btn-finish" disabled>Finish</button>
+      </div>
+    </footer>
+
+    <!-- Slide-Out Setup Drawer -->
+    <aside id="setup-drawer" class="drawer" aria-label="Sensors and settings" aria-hidden="true">
+      <div class="drawer-header">
+        <h2>Treadmill Setup</h2>
+        <button type="button" id="btn-drawer-close" class="icon-btn" aria-label="Close setup">Close</button>
+      </div>
+
+      <div class="drawer-body">
+        <section class="drawer-section">
+          <h3>Bluetooth Sensors</h3>
+          <div class="sensor-row">
+            <div>
+              <strong>Speed &amp; Cadence (RSC 0x1814)</strong>
+              <p id="status-rsc-detail" class="muted">Zwift RunPod or Garmin FR 245 Virtual Run</p>
+            </div>
+            <button type="button" id="btn-connect-rsc" class="btn btn-primary">Connect</button>
+          </div>
+          <div class="sensor-row">
+            <div>
+              <strong>Heart Rate (HR 0x180D)</strong>
+              <p id="status-hr-detail" class="muted">BT HR Chest Strap (primary) or FR 245</p>
+            </div>
+            <button type="button" id="btn-connect-hr" class="btn btn-primary">Connect</button>
+          </div>
+          <p id="ble-warning" class="warn-text hidden"></p>
+        </section>
+
+        <section class="drawer-section">
+          <div class="section-row">
+            <h3>Desk Simulator</h3>
+            <label class="switch">
+              <input type="checkbox" id="toggle-sim" />
+              <span>Enable</span>
+            </label>
+          </div>
+          <div id="sim-controls" class="sim-controls disabled">
+            <label class="range-field">
+              <span>Speed: <strong id="sim-speed-val">9.5</strong> km/h</span>
+              <input type="range" id="sim-speed" min="0" max="20" step="0.5" value="9.5" />
+            </label>
+            <label class="range-field">
+              <span>Incline: <strong id="sim-incline-val">1.0</strong>%</span>
+              <input type="range" id="sim-incline" min="0" max="15" step="0.5" value="1.0" />
+            </label>
+            <label class="range-field">
+              <span>Heart Rate: <strong id="sim-hr-val">142</strong> bpm</span>
+              <input type="range" id="sim-hr" min="75" max="195" step="1" value="142" />
+            </label>
+            <label class="check-row">
+              <input type="checkbox" id="toggle-sim-demo" />
+              <span>Auto interval demo loop (warm-up → surge → stop)</span>
+            </label>
+          </div>
+        </section>
+
+        <section class="drawer-section">
+          <h3>POV Video &amp; Sync</h3>
+          <label class="field">
+            <span>YouTube Preset</span>
+            <select id="yt-preset"></select>
+          </label>
+          <div class="inline-field">
+            <input type="text" id="yt-custom-url" placeholder="Paste YouTube URL or video ID" />
+            <button type="button" id="btn-yt-load" class="btn btn-secondary">Load</button>
+          </div>
+          <div class="field">
+            <span>Local MP4 / WebM Video (Smooth Continuous Sync)</span>
+            <div class="inline-field">
+              <input type="file" id="local-video-input" accept="video/*" class="hidden" />
+              <button type="button" id="btn-pick-local" class="btn btn-secondary">Choose Video File</button>
+              <span id="local-video-name" class="muted truncate">None selected</span>
+            </div>
+          </div>
+          <label class="range-field">
+            <span>Reference Pace (1.0× speed): <strong id="base-speed-val">10.0</strong> km/h</span>
+            <input type="range" id="base-speed" min="5" max="18" step="0.5" value="10.0" />
+          </label>
+          <button type="button" id="btn-drawer-lock-base" class="btn btn-secondary full-width">
+            Lock Current Speed as 1.0×
+          </button>
+        </section>
+
+        <section class="drawer-section">
+          <h3>Calibration &amp; Preferences</h3>
+          <div class="cal-summary">
+            <span>RunPod Multiplier: <strong id="cal-factor-val">1.000×</strong></span>
+            <button type="button" id="btn-cal-reset" class="link-btn">Reset 1.000×</button>
+          </div>
+          <div class="inline-field">
+            <input type="number" id="cal-lcd-kph" min="0.8" max="22" step="0.1" placeholder="Roger Black LCD km/h" />
+            <button type="button" id="btn-cal-sync" class="btn btn-secondary">Sync Speed</button>
+          </div>
+          <label class="range-field">
+            <span>Video Smoothing (EMA): <strong id="ema-tau-val">3.5</strong> s</span>
+            <input type="range" id="ema-tau" min="1.0" max="6.0" step="0.5" value="3.5" />
+          </label>
+          <label class="range-field">
+            <span>Max Heart Rate: <strong id="max-hr-val">180</strong> bpm</span>
+            <input type="range" id="max-hr" min="120" max="220" step="1" value="180" />
+          </label>
+          <label class="check-row">
+            <input type="checkbox" id="toggle-hr-zone-bar" />
+            <span>Show HR Zone Bar (for interval sessions)</span>
+          </label>
+          <label class="check-row">
+            <input type="checkbox" id="toggle-voice-coach" />
+            <span>Voice split cues every 1 km (Web Speech)</span>
+          </label>
+        </section>
+      </div>
+    </aside>
+
+    <!-- Finish & .FIT Export Modal -->
+    <div id="finish-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="finish-title">
+      <div class="modal-card">
+        <h2 id="finish-title">Run Complete — Export .FIT</h2>
+        <div class="summary-grid">
+          <div class="summary-item">
+            <span class="metric-label">Duration</span>
+            <strong id="sum-time">00:00</strong>
+          </div>
+          <div class="summary-item">
+            <span class="metric-label">Recorded Distance</span>
+            <strong id="sum-distance">0.00 km</strong>
+          </div>
+          <div class="summary-item">
+            <span class="metric-label">Avg Pace</span>
+            <strong id="sum-pace">--:-- /km</strong>
+          </div>
+          <div class="summary-item">
+            <span class="metric-label">Avg / Max HR</span>
+            <strong id="sum-hr">-- / --</strong>
+          </div>
+          <div class="summary-item">
+            <span class="metric-label">Elevation Gain</span>
+            <strong id="sum-elev">+0 m</strong>
+          </div>
+          <div class="summary-item">
+            <span class="metric-label">1 km Laps</span>
+            <strong id="sum-laps">0</strong>
+          </div>
+        </div>
+
+        <div class="reconcile-box">
+          <label class="field">
+            <span>Match Roger Black Console Distance (optional, km)</span>
+            <input type="number" id="finish-actual-km" min="0.05" max="100" step="0.01" placeholder="Leave blank to keep pod distance" />
+          </label>
+          <label class="check-row">
+            <input type="checkbox" id="finish-update-cal" checked />
+            <span>Update saved RunPod calibration factor from this correction</span>
+          </label>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" id="btn-modal-discard" class="btn btn-danger">Discard</button>
+          <button type="button" id="btn-modal-resume" class="btn btn-secondary">Resume</button>
+          <button type="button" id="btn-modal-download" class="btn btn-start">Download .FIT</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
