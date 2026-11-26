@@ -312,6 +312,7 @@ export class ThreeJsView extends EventTarget {
     this.grassMesh = null;
     this.cloudMesh = null;
     this.mountainGroup = null;
+    this.gpxMountainRing = null;
     this.mountainMat = null;
     this.mountainCapMat = null;
     this.particlePoints = null;
@@ -333,6 +334,9 @@ export class ThreeJsView extends EventTarget {
     this.gpxCanopyLowerMesh = null;
     this.gpxCanopyUpperMesh = null;
     this.gpxPropMesh = null;
+    this.gpxBuildingMesh = null;
+    this.gpxRoofMesh = null;
+    this.realWorldData = null;
 
     this._scenerySlots = [];
     this._grassSlots = [];
@@ -404,6 +408,7 @@ export class ThreeJsView extends EventTarget {
     this.grassMesh = null;
     this.cloudMesh = null;
     this.mountainGroup = null;
+    this.gpxMountainRing = null;
     this.particlePoints = null;
     this.particlePositions = null;
     this._scenerySlots = [];
@@ -434,7 +439,15 @@ export class ThreeJsView extends EventTarget {
 
   setGpxRoute(routeOrNull) {
     this.gpxRoute = routeOrNull || null;
+    this.realWorldData = null;
     if (this.scene) {
+      this._rebuildGpxScene();
+    }
+  }
+
+  applyRealWorldData({ dem = null, buildings = [] } = {}) {
+    this.realWorldData = { dem, buildings };
+    if (this.scene && this.gpxRoute) {
       this._rebuildGpxScene();
     }
   }
@@ -698,6 +711,7 @@ export class ThreeJsView extends EventTarget {
 
     if (preset.key !== 'low') {
       this._buildMountains(preset, spanM);
+      this._buildGpxHorizonMountains(preset, spanM);
       this._buildClouds(preset, spanM);
     }
 
@@ -738,6 +752,8 @@ export class ThreeJsView extends EventTarget {
     this.gpxCanopyLowerMesh = null;
     this.gpxCanopyUpperMesh = null;
     this.gpxPropMesh = null;
+    this.gpxBuildingMesh = null;
+    this.gpxRoofMesh = null;
   }
 
   _rebuildGpxScene() {
@@ -746,10 +762,16 @@ export class ThreeJsView extends EventTarget {
       if (this.corridorGroup) {
         this.corridorGroup.visible = true;
       }
+      if (this.gpxMountainRing) {
+        this.gpxMountainRing.visible = false;
+      }
       return;
     }
 
     this.corridorGroup.visible = false;
+    if (this.gpxMountainRing) {
+      this.gpxMountainRing.visible = true;
+    }
     this.worldGroup.rotation.x = 0;
 
     const route = this.gpxRoute;
@@ -787,13 +809,24 @@ export class ThreeJsView extends EventTarget {
     gpxGroup.add(gpxRoadMesh);
     this.gpxRoadMesh = gpxRoadMesh;
 
-    // 2. Sculpted 3D roadside terrain skirt
+    // 2. Sculpted 3D roadside terrain skirt (real DEM if loaded, procedural fallback otherwise)
     this._buildGpxTerrainSkirt(route, theme, preset, gpxGroup);
 
     // 3. Route-aligned instanced trees/pylons/props
     this._buildGpxScenery(route, theme, preset, gpxGroup);
 
-    // 4. Route-aligned 500 m milestone arches
+    // 4. Real-world OpenStreetMap buildings (Phase 2C)
+    if (this.realWorldData?.buildings?.length) {
+      this._buildGpxBuildings(
+        this.realWorldData.buildings,
+        this.realWorldData.dem || null,
+        theme,
+        preset,
+        gpxGroup,
+      );
+    }
+
+    // 5. Route-aligned 500 m milestone arches
     const archInterval = 500;
     const archCount = Math.min(16, Math.floor(route.totalDistanceM / archInterval));
     for (let k = 1; k <= archCount; k += 1) {
@@ -816,7 +849,7 @@ export class ThreeJsView extends EventTarget {
       samples.push(route.samples[route.samples.length - 1]);
     }
 
-    const cols = [-74, -36, -15, -4.3, 4.3, 15, 36, 74];
+    const cols = [-110, -64, -32, -14, -4.3, 4.3, 14, 32, 64, 110];
     const colCount = cols.length;
     const vertCount = samples.length * colCount;
     const positions = new Float32Array(vertCount * 3);
@@ -826,35 +859,53 @@ export class ThreeJsView extends EventTarget {
     const secondary = new THREE.Color(theme.terrainSecondary);
     const tmp = new THREE.Color();
     const isCoastal = theme.key === 'coastal';
+    const dem = this.realWorldData?.dem || null;
+    const smoothstep = (e0, e1, x) => {
+      const t = Math.max(0, Math.min(1, (x - e0) / Math.max(1e-6, e1 - e0)));
+      return t * t * (3 - 2 * t);
+    };
 
     for (let i = 0; i < samples.length; i += 1) {
       const smp = samples[i];
       const rx = smp.right[0];
       const rz = smp.right[2];
+      const roadDemY = dem ? dem.sampleAtEnu(smp.x, smp.z) : null;
 
       for (let c = 0; c < colCount; c += 1) {
         const lat = cols[c];
         const absLat = Math.abs(lat);
         const idx = (i * colCount + c) * 3;
+        const wx = smp.x + rx * lat;
+        const wz = smp.z + rz * lat;
 
         let y = smp.y - 0.08;
         if (absLat > 4.4) {
           if (isCoastal && lat > 4.4) {
             y = smp.y - 0.45;
             tmp.copy(secondary);
+          } else if (dem) {
+            const demY = dem.sampleAtEnu(wx, wz);
+            const blend = smoothstep(4.4, 22.0, absLat);
+            const roadBedY = smp.y - 0.08;
+            const rawDelta =
+              Number.isFinite(demY) && Number.isFinite(roadDemY) ? demY - roadDemY : 0;
+            const relDelta = Math.max(-14, Math.min(48, rawDelta));
+            y = roadBedY + relDelta * blend;
+            const shade = Math.min(0.68, Math.abs(y - smp.y) * 0.025 + ((absLat - 4.4) / 105) * 0.4);
+            tmp.copy(primary).lerp(secondary, shade);
           } else {
-            const edge = (absLat - 4.4) / 14;
+            const edge = (absLat - 4.4) / 16;
             const wave = Math.sin(smp.s * 0.04 + lat * 0.14) * 2.1 + Math.cos(lat * 0.11) * 1.1;
             y = smp.y + Math.max(0.05, edge * 1.4 + wave * Math.min(1, edge));
-            tmp.copy(primary).lerp(secondary, Math.min(0.65, edge * 0.18));
+            tmp.copy(primary).lerp(secondary, Math.min(0.68, edge * 0.16));
           }
         } else {
           tmp.copy(primary);
         }
 
-        positions[idx] = smp.x + rx * lat;
+        positions[idx] = wx;
         positions[idx + 1] = y;
-        positions[idx + 2] = smp.z + rz * lat;
+        positions[idx + 2] = wz;
         colors[idx] = tmp.r;
         colors[idx + 1] = tmp.g;
         colors[idx + 2] = tmp.b;
@@ -898,6 +949,65 @@ export class ThreeJsView extends EventTarget {
     mesh.receiveShadow = preset.shadows;
     parentGroup.add(mesh);
     this.gpxSkirtMesh = mesh;
+  }
+
+  _buildGpxBuildings(buildings, dem, theme, preset, parentGroup) {
+    const count = buildings.length;
+    if (count === 0) {
+      return;
+    }
+
+    const wallColor =
+      theme.key === 'synthwave' ? '#2e1065' : theme.key === 'coastal' ? '#fef3c7' : '#e7dec8';
+    const roofColor =
+      theme.key === 'synthwave' ? '#f472b6' : theme.key === 'coastal' ? '#c2410c' : '#64748b';
+
+    const wallGeo = this._trackGpx(new THREE.BoxGeometry(1, 1, 1));
+    const wallMat = this._makeLitMaterial(preset, { color: wallColor, roughness: 0.85 }, 'gpx');
+    const wallMesh = new THREE.InstancedMesh(wallGeo, wallMat, count);
+
+    const roofGeo = this._trackGpx(new THREE.ConeGeometry(0.74, 1, 4));
+    roofGeo.rotateY(Math.PI / 4);
+    const roofMat = this._makeLitMaterial(preset, { color: roofColor, roughness: 0.78 }, 'gpx');
+    const roofMesh = new THREE.InstancedMesh(roofGeo, roofMat, count);
+
+    if (preset.shadows) {
+      wallMesh.castShadow = true;
+      wallMesh.receiveShadow = true;
+      roofMesh.castShadow = true;
+    }
+
+    const dummy = this._dummy;
+    for (let i = 0; i < count; i += 1) {
+      const b = buildings[i];
+      let demDelta = 0;
+      if (dem) {
+        const bDemY = dem.sampleAtEnu(b.cx, b.cz);
+        const rDemY = dem.sampleAtEnu(b.roadX ?? b.cx, b.roadZ ?? b.cz);
+        if (Number.isFinite(bDemY) && Number.isFinite(rDemY)) {
+          demDelta = Math.max(-14, Math.min(48, bDemY - rDemY));
+        }
+      }
+      const baseY = (b.yBaseHint ?? 0) + demDelta - 0.4;
+
+      dummy.position.set(b.cx, baseY + b.heightM * 0.5, b.cz);
+      dummy.rotation.set(0, b.yawRad || 0, 0);
+      dummy.scale.set(b.widthM, b.heightM, b.depthM);
+      dummy.updateMatrix();
+      wallMesh.setMatrixAt(i, dummy.matrix);
+
+      dummy.position.set(b.cx, baseY + b.heightM + 1.1, b.cz);
+      dummy.rotation.set(0, b.yawRad || 0, 0);
+      dummy.scale.set(b.widthM, 2.2, b.depthM);
+      dummy.updateMatrix();
+      roofMesh.setMatrixAt(i, dummy.matrix);
+    }
+
+    wallMesh.instanceMatrix.needsUpdate = true;
+    roofMesh.instanceMatrix.needsUpdate = true;
+    parentGroup.add(wallMesh, roofMesh);
+    this.gpxBuildingMesh = wallMesh;
+    this.gpxRoofMesh = roofMesh;
   }
 
   _buildGpxScenery(route, theme, preset, parentGroup) {
@@ -1046,6 +1156,40 @@ export class ThreeJsView extends EventTarget {
 
     this.corridorGroup.add(group);
     this.mountainGroup = group;
+  }
+
+  _buildGpxHorizonMountains(_preset, spanM) {
+    if (!this.mountainMat || !this.mountainCapMat || !this.scene) {
+      return;
+    }
+    const ring = new THREE.Group();
+    const peakCount = 20;
+    const ringRadius = Math.max(115, spanM - 45);
+    for (let i = 0; i < peakCount; i += 1) {
+      const angle = (i / peakCount) * Math.PI * 2 + (seededRand(i + 150) - 0.5) * 0.12;
+      const dist = ringRadius + (seededRand(i * 3 + 151) - 0.5) * 26;
+      const h = 38 + seededRand(i * 3 + 152) * 38;
+      const r = 26 + seededRand(i * 3 + 153) * 18;
+      const x = Math.cos(angle) * dist;
+      const z = Math.sin(angle) * dist;
+
+      const body = new THREE.Mesh(
+        this._track(new THREE.ConeGeometry(r, h, 5)),
+        this.mountainMat,
+      );
+      body.position.set(x, h * 0.45, z);
+      ring.add(body);
+
+      const cap = new THREE.Mesh(
+        this._track(new THREE.ConeGeometry(r * 0.38, h * 0.36, 5)),
+        this.mountainCapMat,
+      );
+      cap.position.set(x, h * 0.78, z);
+      ring.add(cap);
+    }
+    ring.visible = Boolean(this.gpxRoute);
+    this.scene.add(ring);
+    this.gpxMountainRing = ring;
   }
 
   _buildClouds(preset, spanM) {
@@ -1598,6 +1742,10 @@ export class ThreeJsView extends EventTarget {
 
     if (this.particlePoints) {
       this.particlePoints.position.set(pos.x, pos.y, pos.z);
+    }
+
+    if (this.gpxMountainRing) {
+      this.gpxMountainRing.position.set(pos.x, pos.y - 8, pos.z);
     }
 
     this.ghostGroup.visible = ghost.visibleInRange;

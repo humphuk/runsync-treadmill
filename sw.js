@@ -1,4 +1,4 @@
-const CACHE_NAME = 'runsync-v6';
+const CACHE_NAME = 'runsync-v8';
 
 const APP_SHELL = [
   './',
@@ -22,6 +22,9 @@ const APP_SHELL = [
   './src/world/gpx-processor.js',
   './src/world/road-terrain-mesh.js',
   './src/world/gpx-route.js',
+  './src/world/terrarium-dem.js',
+  './src/world/osm-overpass.js',
+  './src/world/real-world-loader.js',
   './src/export/fit-encoder.js',
   './src/audio/voice-coach.js',
 ];

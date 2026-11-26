@@ -13,6 +13,38 @@ import {
   smoothElevation,
 } from './gpx-processor.js';
 
+const EARTH_RADIUS_M = 6378137;
+const DEG_TO_RAD = Math.PI / 180;
+const RAD_TO_DEG = 180 / Math.PI;
+
+/**
+ * Inverse of projectLatLonToEnu for XZ coordinates.
+ * @param {number} x East meters
+ * @param {number} z South meters (-North)
+ * @param {{ lat: number, lon: number }} origin
+ * @returns {{ lat: number, lon: number }}
+ */
+export function enuToLatLon(x, z, origin) {
+  const cosLat0 = Math.max(0.1, Math.cos(origin.lat * DEG_TO_RAD));
+  const lat = origin.lat + (-z / EARTH_RADIUS_M) * RAD_TO_DEG;
+  const lon = origin.lon + (x / (EARTH_RADIUS_M * cosLat0)) * RAD_TO_DEG;
+  return { lat, lon };
+}
+
+/**
+ * Project WGS84 lat/lon to local ENU (x, z) matching Three.js Y-up coordinates.
+ * @param {number} lat
+ * @param {number} lon
+ * @param {{ lat: number, lon: number }} origin
+ * @returns {{ x: number, z: number }}
+ */
+export function latLonToEnuXZ(lat, lon, origin) {
+  const cosLat0 = Math.max(0.1, Math.cos(origin.lat * DEG_TO_RAD));
+  const x = (lon - origin.lon) * DEG_TO_RAD * EARTH_RADIUS_M * cosLat0;
+  const z = -(lat - origin.lat) * DEG_TO_RAD * EARTH_RADIUS_M;
+  return { x, z };
+}
+
 function clamp(val, min, max) {
   return Math.min(max, Math.max(min, val));
 }
@@ -142,6 +174,11 @@ export function buildRouteFromGpx(gpxXml, name = 'Custom GPX', id = 'custom') {
   return {
     id,
     name,
+    origin: {
+      lat: rawPts[0].lat,
+      lon: rawPts[0].lon,
+      ele: baseEle,
+    },
     samples,
     totalDistanceM,
     totalAscentM: Math.round(totalAscentM * 10) / 10,

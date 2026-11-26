@@ -4,7 +4,8 @@ A zero-bundler, offline-capable Progressive Web App (PWA) for indoor treadmill r
 
 1. **Phase 1 (Complete):** Web Bluetooth telemetry (**Zwift RunPod** `0x1814` + **BT HR Chest Strap** `0x180D` or **Garmin FR 245** *Virtual Run*), speed-synced **YouTube POV** (Premium Lite compatible, with `0.25×` hysteresis) & **Local MP4/WebM** (continuous smooth scaling), manual incline logging, optional HR zone bar & 1 km voice splits, Screen Wake Lock, and Garmin/Strava/Intervals.icu **`.FIT` + HRV export** with post-run Roger Black console distance reconciliation.
 2. **Phase 2A (Complete):** Offline lightweight **Three.js 3D World** view tuned for Lenovo Duet (`devicePixelRatio <= 1`, `< 15` draw calls via `InstancedMesh`, 3 themes: *Forest Trail*, *Coastal Sunset*, *Synthwave Grid*, dynamic incline road pitch, 500 m milestone arches, toggleable stride bob, and Ghost Pacer).
-3. **Phase 2B (Complete):** Real-world **`.gpx` 3D courses** (built-in *Box Hill 5K*, *Rolling Parkrun 5K*, *Alpine Hill Repeats 4K*, plus custom `.gpx` file upload), live **2D SVG elevation profile** with Runner & Ghost Pacer dots, auto-synced route grade, and Web Speech incline callouts.
+3. **Phase 2B (Complete):** Real-world **`.gpx` 3D courses** (built-in *Box Hill 5K*, *Rolling Parkrun 5K*, *Alpine Hill Repeats 4K*, plus custom `.gpx` file upload), live **2D SVG elevation profile** + **2D route mini-map**, auto-synced route grade, and Web Speech incline callouts.
+4. **Phase 2C (Complete):** Online **AWS Terrarium DEM** real terrain elevation tiles + **OpenStreetMap Overpass** 3D instanced buildings with datum alignment, `localStorage` caching, and seamless offline fallback.
 4. **Phase 3 / 3B (Planned):** Non-invasive **JZK ESP-32S** BLE FTMS (`0x1826`) speed + deck incline bridge (`KY-003`/`KY-033` + `GY-521` IMU) + optional **ESP32-4848S040** console HMI.
 5. **Phase 4 (Planned):** Closed-loop speed automation after console PCB & incline rocker multimeter inspection.
 

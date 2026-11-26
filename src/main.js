@@ -20,10 +20,11 @@ import {
   getBuiltinRoute,
   sampleRouteAtDistance,
 } from './world/gpx-route.js';
+import { fetchOsmScenery, fetchTerrariumHeightfield } from './world/real-world-loader.js';
 import { RunRecorder } from './export/fit-encoder.js';
 import { VoiceCoach } from './audio/voice-coach.js';
 
-const APP_VERSION = 'v0.4.0';
+const APP_VERSION = 'v0.5.1';
 const SETTINGS_KEY = 'runsync_settings_v1';
 
 const DEFAULT_SETTINGS = {
@@ -44,6 +45,7 @@ const DEFAULT_SETTINGS = {
   ghostPaceSecPerKm: 330,
   gpxCourseId: 'none',
   gpxAutoIncline: true,
+  realWorldEnabled: true,
 };
 
 const LEGACY_PRESET_IDS = new Set([
@@ -181,6 +183,8 @@ const els = {
   btnPickGpx: document.getElementById('btn-pick-gpx'),
   gpxFileName: document.getElementById('gpx-file-name'),
   toggleGpxAutoIncline: document.getElementById('toggle-gpx-auto-incline'),
+  toggleRealWorld: document.getElementById('toggle-real-world'),
+  realWorldStatus: document.getElementById('real-world-status'),
 
   calFactorVal: document.getElementById('cal-factor-val'),
   btnCalReset: document.getElementById('btn-cal-reset'),
@@ -280,6 +284,7 @@ els.gpxCourse.value = ['none', 'box-hill-5k', 'rolling-parkrun-5k', 'alpine-repe
   ? settings.gpxCourseId
   : 'none';
 els.toggleGpxAutoIncline.checked = settings.gpxAutoIncline;
+els.toggleRealWorld.checked = settings.realWorldEnabled;
 
 const elevationProfile = new ElevationProfileWidget(els.gpxProfileBar);
 const routeMiniMap = new RouteMiniMapWidget(els.gpxMinimap);
@@ -287,6 +292,7 @@ let activeGpxRoute = null;
 let lastAnnouncedGradePct = 0;
 let upcomingCueText = '';
 let lastCueClearedAtMs = 0;
+let gpxLoadSeq = 0;
 
 if (!navigator.bluetooth) {
   els.bleWarning.textContent =
@@ -531,7 +537,41 @@ els.ghostPace.addEventListener('input', () => {
   saveSettings(settings);
 });
 
+async function loadRealWorldForRoute(route, token) {
+  if (!route || !settings.realWorldEnabled) {
+    els.realWorldStatus.textContent = route
+      ? 'Procedural terrain (real-world disabled)'
+      : 'Select a course to load real-world terrain';
+    return;
+  }
+
+  els.realWorldStatus.textContent = 'Loading real-world terrain & buildings...';
+  const [demRes, osmRes] = await Promise.allSettled([
+    fetchTerrariumHeightfield(route),
+    fetchOsmScenery(route),
+  ]);
+
+  if (token !== gpxLoadSeq || activeGpxRoute !== route || !settings.realWorldEnabled) {
+    return;
+  }
+
+  const dem = demRes.status === 'fulfilled' ? demRes.value : null;
+  const buildings = osmRes.status === 'fulfilled' ? osmRes.value.buildings : [];
+
+  if (dem || buildings.length > 0) {
+    threeView.applyRealWorldData({ dem, buildings });
+    const parts = [];
+    if (dem) parts.push(`DEM (${dem.tileCount} tiles)`);
+    if (buildings.length > 0) parts.push(`${buildings.length} buildings`);
+    els.realWorldStatus.textContent = `Loaded: ${parts.join(' · ')}`;
+  } else {
+    els.realWorldStatus.textContent = 'Procedural terrain (offline or unavailable)';
+  }
+}
+
 async function applyGpxRoute(route, { switchToThree = true, courseId = 'none', label = '' } = {}) {
+  gpxLoadSeq += 1;
+  const token = gpxLoadSeq;
   activeGpxRoute = route || null;
   lastAnnouncedGradePct = 0;
   upcomingCueText = '';
@@ -551,6 +591,8 @@ async function applyGpxRoute(route, { switchToThree = true, courseId = 'none', l
     els.gpxProfileBar.classList.add('hidden');
     els.gpxMinimap.classList.add('hidden');
   }
+
+  loadRealWorldForRoute(activeGpxRoute, token);
 }
 
 els.gpxCourse.addEventListener('change', () => {
@@ -585,6 +627,20 @@ els.gpxFileInput.addEventListener('change', async () => {
 els.toggleGpxAutoIncline.addEventListener('change', () => {
   settings.gpxAutoIncline = els.toggleGpxAutoIncline.checked;
   saveSettings(settings);
+});
+
+els.toggleRealWorld.addEventListener('change', () => {
+  settings.realWorldEnabled = els.toggleRealWorld.checked;
+  saveSettings(settings);
+  gpxLoadSeq += 1;
+  if (!settings.realWorldEnabled) {
+    threeView.applyRealWorldData({ dem: null, buildings: [] });
+    els.realWorldStatus.textContent = activeGpxRoute
+      ? 'Procedural terrain (real-world disabled)'
+      : 'Select a course to load real-world terrain';
+  } else if (activeGpxRoute) {
+    loadRealWorldForRoute(activeGpxRoute, gpxLoadSeq);
+  }
 });
 
 els.btnMute.addEventListener('click', () => {
