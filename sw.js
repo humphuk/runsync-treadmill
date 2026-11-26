@@ -1,4 +1,4 @@
-const CACHE_NAME = 'runsync-v4';
+const CACHE_NAME = 'runsync-v6';
 
 const APP_SHELL = [
   './',
@@ -17,6 +17,11 @@ const APP_SHELL = [
   './src/views/local-video-view.js',
   './src/views/threejs-math.js',
   './src/views/threejs-view.js',
+  './src/views/elevation-profile.js',
+  './src/views/route-minimap.js',
+  './src/world/gpx-processor.js',
+  './src/world/road-terrain-mesh.js',
+  './src/world/gpx-route.js',
   './src/export/fit-encoder.js',
   './src/audio/voice-coach.js',
 ];

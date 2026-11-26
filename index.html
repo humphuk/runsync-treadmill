@@ -42,17 +42,24 @@
         </div>
         <button type="button" id="btn-mute" class="icon-btn" title="Toggle video mute">Muted</button>
         <button type="button" id="btn-lock-base" class="icon-btn" title="Lock current speed as 1.0x video speed">Lock 1.0×</button>
-        <button type="button" id="btn-drawer-toggle" class="icon-btn btn-accent">Setup</button>
+        <button type="button" id="btn-drawer-toggle" class="icon-btn btn-accent">Settings</button>
       </div>
     </header>
 
-    <!-- Optional HR Zone Strip -->
-    <div id="hr-zone-bar" class="hr-zone-bar hidden" aria-label="Heart rate zone bar">
-      <div class="hr-zone-seg" data-zone="1">Z1</div>
-      <div class="hr-zone-seg" data-zone="2">Z2</div>
-      <div class="hr-zone-seg" data-zone="3">Z3</div>
-      <div class="hr-zone-seg" data-zone="4">Z4</div>
-      <div class="hr-zone-seg" data-zone="5">Z5</div>
+    <!-- Optional Perf HUD & Route Mini-Map -->
+    <div id="perf-hud" class="perf-hud hidden" aria-label="Performance metrics">-- fps · -- ms</div>
+    <div id="gpx-minimap" class="gpx-minimap hidden" aria-label="Course mini-map"></div>
+
+    <!-- Stacked Overlays (2D Elevation Profile + Optional HR Zone Strip) -->
+    <div class="hud-stack">
+      <div id="gpx-profile-bar" class="gpx-profile-bar hidden" aria-label="GPX elevation profile"></div>
+      <div id="hr-zone-bar" class="hr-zone-bar hidden" aria-label="Heart rate zone bar">
+        <div class="hr-zone-seg" data-zone="1">Z1</div>
+        <div class="hr-zone-seg" data-zone="2">Z2</div>
+        <div class="hr-zone-seg" data-zone="3">Z3</div>
+        <div class="hr-zone-seg" data-zone="4">Z4</div>
+        <div class="hr-zone-seg" data-zone="5">Z5</div>
+      </div>
     </div>
 
     <!-- Always-visible Bottom Telemetry HUD -->
@@ -106,11 +113,11 @@
       </div>
     </footer>
 
-    <!-- Slide-Out Setup Drawer -->
+    <!-- Slide-Out Settings Drawer -->
     <aside id="setup-drawer" class="drawer" aria-label="Sensors and settings" aria-hidden="true">
       <div class="drawer-header">
-        <h2>Treadmill Setup</h2>
-        <button type="button" id="btn-drawer-close" class="icon-btn" aria-label="Close setup">Close</button>
+        <h2>Settings</h2>
+        <button type="button" id="btn-drawer-close" class="icon-btn" aria-label="Close settings">Close</button>
       </div>
 
       <div class="drawer-body">
@@ -118,15 +125,15 @@
           <h3>Bluetooth Sensors</h3>
           <div class="sensor-row">
             <div>
-              <strong>Speed &amp; Cadence (RSC 0x1814)</strong>
-              <p id="status-rsc-detail" class="muted">Zwift RunPod or Garmin FR 245 Virtual Run</p>
+              <strong>Footpod / Treadmill Speed</strong>
+              <p id="status-rsc-detail" class="muted">Zwift RunPod or Garmin watch</p>
             </div>
             <button type="button" id="btn-connect-rsc" class="btn btn-primary">Connect</button>
           </div>
           <div class="sensor-row">
             <div>
-              <strong>Heart Rate (HR 0x180D)</strong>
-              <p id="status-hr-detail" class="muted">BT HR Chest Strap (primary) or FR 245</p>
+              <strong>Heart Rate Monitor</strong>
+              <p id="status-hr-detail" class="muted">Bluetooth chest strap or watch</p>
             </div>
             <button type="button" id="btn-connect-hr" class="btn btn-primary">Connect</button>
           </div>
@@ -135,7 +142,7 @@
 
         <section class="drawer-section">
           <div class="section-row">
-            <h3>Desk Simulator</h3>
+            <h3>Demo Mode</h3>
             <label class="switch">
               <input type="checkbox" id="toggle-sim" />
               <span>Enable</span>
@@ -156,13 +163,13 @@
             </label>
             <label class="check-row">
               <input type="checkbox" id="toggle-sim-demo" />
-              <span>Auto interval demo loop (warm-up → surge → stop)</span>
+              <span>Auto interval workout demo</span>
             </label>
           </div>
         </section>
 
         <section class="drawer-section">
-          <h3>POV Video &amp; Sync</h3>
+          <h3>Video &amp; Sync</h3>
           <label class="field">
             <span>YouTube Preset</span>
             <select id="yt-preset"></select>
@@ -172,7 +179,7 @@
             <button type="button" id="btn-yt-load" class="btn btn-secondary">Load</button>
           </div>
           <div class="field">
-            <span>Local MP4 / WebM Video (Smooth Continuous Sync)</span>
+            <span>Local Video File</span>
             <div class="inline-field">
               <input type="file" id="local-video-input" accept="video/*" class="hidden" />
               <button type="button" id="btn-pick-local" class="btn btn-secondary">Choose Video File</button>
@@ -189,7 +196,7 @@
         </section>
 
         <section class="drawer-section">
-          <h3>3D World (Phase 2A)</h3>
+          <h3>3D World</h3>
           <label class="field">
             <span>Theme</span>
             <select id="three-theme">
@@ -199,7 +206,7 @@
             </select>
           </label>
           <label class="field">
-            <span>GPU Quality</span>
+            <span>Graphics Quality</span>
             <select id="three-quality">
               <option value="low">Low (Battery / Max FPS)</option>
               <option value="medium">Medium (Lenovo Duet)</option>
@@ -218,20 +225,38 @@
             <span>Ghost Target Pace: <strong id="ghost-pace-val">5:30</strong> /km</span>
             <input type="range" id="ghost-pace" min="210" max="480" step="5" value="330" />
           </label>
+          <label class="field">
+            <span>Course / Route</span>
+            <select id="gpx-course">
+              <option value="none">Endless Corridor</option>
+              <option value="box-hill-5k">Box Hill 5K Loop (Surrey Hills)</option>
+              <option value="rolling-parkrun-5k">Rolling Parkrun 5K</option>
+              <option value="alpine-repeats-4k">Alpine Hill Repeats (4K)</option>
+            </select>
+          </label>
+          <div class="inline-field">
+            <input type="file" id="gpx-file-input" accept=".gpx,application/gpx+xml,text/xml" class="hidden" />
+            <button type="button" id="btn-pick-gpx" class="btn btn-secondary">Load .gpx File</button>
+            <span id="gpx-file-name" class="muted truncate">Endless Corridor</span>
+          </div>
+          <label class="check-row">
+            <input type="checkbox" id="toggle-gpx-auto-incline" checked />
+            <span>Auto-sync HUD incline to route grade</span>
+          </label>
         </section>
 
         <section class="drawer-section">
           <h3>Calibration &amp; Preferences</h3>
           <div class="cal-summary">
-            <span>RunPod Multiplier: <strong id="cal-factor-val">1.000×</strong></span>
+            <span>Speed Calibration: <strong id="cal-factor-val">1.000×</strong></span>
             <button type="button" id="btn-cal-reset" class="link-btn">Reset 1.000×</button>
           </div>
           <div class="inline-field">
-            <input type="number" id="cal-lcd-kph" min="0.8" max="22" step="0.1" placeholder="Roger Black LCD km/h" />
+            <input type="number" id="cal-lcd-kph" min="0.8" max="22" step="0.1" placeholder="Treadmill speed (km/h)" />
             <button type="button" id="btn-cal-sync" class="btn btn-secondary">Sync Speed</button>
           </div>
           <label class="range-field">
-            <span>Video Smoothing (EMA): <strong id="ema-tau-val">3.5</strong> s</span>
+            <span>Speed Smoothing: <strong id="ema-tau-val">3.5</strong> s</span>
             <input type="range" id="ema-tau" min="1.0" max="6.0" step="0.5" value="3.5" />
           </label>
           <label class="range-field">
@@ -240,20 +265,26 @@
           </label>
           <label class="check-row">
             <input type="checkbox" id="toggle-hr-zone-bar" />
-            <span>Show HR Zone Bar (for interval sessions)</span>
+            <span>Show HR Zone Bar</span>
           </label>
           <label class="check-row">
             <input type="checkbox" id="toggle-voice-coach" />
-            <span>Voice split cues every 1 km (Web Speech)</span>
+            <span>Voice cues (1 km splits &amp; hills)</span>
+          </label>
+          <label class="check-row">
+            <input type="checkbox" id="toggle-perf-hud" />
+            <span>Show performance HUD</span>
           </label>
         </section>
+
+        <div class="drawer-version">RunSync <span id="app-version">v0.4.0</span></div>
       </div>
     </aside>
 
     <!-- Finish & .FIT Export Modal -->
     <div id="finish-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="finish-title">
       <div class="modal-card">
-        <h2 id="finish-title">Run Complete — Export .FIT</h2>
+        <h2 id="finish-title">Run Complete — Export Activity</h2>
         <div class="summary-grid">
           <div class="summary-item">
             <span class="metric-label">Duration</span>
@@ -283,12 +314,12 @@
 
         <div class="reconcile-box">
           <label class="field">
-            <span>Match Roger Black Console Distance (optional, km)</span>
+            <span>Match Treadmill Distance (optional, km)</span>
             <input type="number" id="finish-actual-km" min="0.05" max="100" step="0.01" placeholder="Leave blank to keep pod distance" />
           </label>
           <label class="check-row">
             <input type="checkbox" id="finish-update-cal" checked />
-            <span>Update saved RunPod calibration factor from this correction</span>
+            <span>Save calibration for next run</span>
           </label>
         </div>
 

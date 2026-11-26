@@ -9,6 +9,7 @@ export class VoiceCoach {
     this.enabled = Boolean(enabled);
     this.splitMeters = splitMeters;
     this._nextSplitM = splitMeters;
+    this._lastInclinePromptMs = 0;
   }
 
   setEnabled(enabled) {
@@ -21,6 +22,20 @@ export class VoiceCoach {
   reset(currentDistanceM = 0) {
     const completedSplits = Math.floor(Math.max(0, currentDistanceM) / this.splitMeters);
     this._nextSplitM = (completedSplits + 1) * this.splitMeters;
+    this._lastInclinePromptMs = 0;
+  }
+
+  onInclinePrompt(promptText) {
+    if (!this.enabled || !promptText) {
+      return false;
+    }
+    const now = Date.now();
+    if (now - this._lastInclinePromptMs < 15000) {
+      return false;
+    }
+    this._lastInclinePromptMs = now;
+    this.announce(promptText);
+    return true;
   }
 
   announce(text) {

@@ -11,9 +11,19 @@ import { ViewManager } from './views/view-manager.js';
 import { YOUTUBE_PRESETS, YouTubeView } from './views/youtube-view.js';
 import { LocalVideoView } from './views/local-video-view.js';
 import { ThreeJsView } from './views/threejs-view.js';
+import { updateGhostPacer } from './views/threejs-math.js';
+import { ElevationProfileWidget } from './views/elevation-profile.js';
+import { RouteMiniMapWidget } from './views/route-minimap.js';
+import {
+  buildRouteFromGpx,
+  computeUpcomingGradeAlert,
+  getBuiltinRoute,
+  sampleRouteAtDistance,
+} from './world/gpx-route.js';
 import { RunRecorder } from './export/fit-encoder.js';
 import { VoiceCoach } from './audio/voice-coach.js';
 
+const APP_VERSION = 'v0.4.0';
 const SETTINGS_KEY = 'runsync_settings_v1';
 
 const DEFAULT_SETTINGS = {
@@ -23,6 +33,7 @@ const DEFAULT_SETTINGS = {
   maxHr: 180,
   showHrZoneBar: false,
   voiceCoachEnabled: false,
+  showPerfHud: false,
   youtubeVideoId: YOUTUBE_PRESETS[0].id,
   activeView: 'youtube',
   muted: true,
@@ -31,6 +42,8 @@ const DEFAULT_SETTINGS = {
   threeCameraBob: true,
   ghostEnabled: true,
   ghostPaceSecPerKm: 330,
+  gpxCourseId: 'none',
+  gpxAutoIncline: true,
 };
 
 const LEGACY_PRESET_IDS = new Set([
@@ -111,6 +124,9 @@ const els = {
   btnDrawerToggle: document.getElementById('btn-drawer-toggle'),
   btnDrawerClose: document.getElementById('btn-drawer-close'),
   drawer: document.getElementById('setup-drawer'),
+  perfHud: document.getElementById('perf-hud'),
+  gpxMinimap: document.getElementById('gpx-minimap'),
+  gpxProfileBar: document.getElementById('gpx-profile-bar'),
   hrZoneBar: document.getElementById('hr-zone-bar'),
 
   hudPace: document.getElementById('hud-pace'),
@@ -160,6 +176,11 @@ const els = {
   toggleGhost: document.getElementById('toggle-ghost'),
   ghostPace: document.getElementById('ghost-pace'),
   ghostPaceVal: document.getElementById('ghost-pace-val'),
+  gpxCourse: document.getElementById('gpx-course'),
+  gpxFileInput: document.getElementById('gpx-file-input'),
+  btnPickGpx: document.getElementById('btn-pick-gpx'),
+  gpxFileName: document.getElementById('gpx-file-name'),
+  toggleGpxAutoIncline: document.getElementById('toggle-gpx-auto-incline'),
 
   calFactorVal: document.getElementById('cal-factor-val'),
   btnCalReset: document.getElementById('btn-cal-reset'),
@@ -171,6 +192,8 @@ const els = {
   maxHrVal: document.getElementById('max-hr-val'),
   toggleHrZoneBar: document.getElementById('toggle-hr-zone-bar'),
   toggleVoiceCoach: document.getElementById('toggle-voice-coach'),
+  togglePerfHud: document.getElementById('toggle-perf-hud'),
+  appVersion: document.getElementById('app-version'),
 
   finishModal: document.getElementById('finish-modal'),
   sumTime: document.getElementById('sum-time'),
@@ -242,6 +265,8 @@ els.maxHrVal.textContent = String(settings.maxHr);
 els.toggleHrZoneBar.checked = settings.showHrZoneBar;
 els.hrZoneBar.classList.toggle('hidden', !settings.showHrZoneBar);
 els.toggleVoiceCoach.checked = settings.voiceCoachEnabled;
+els.togglePerfHud.checked = settings.showPerfHud;
+els.appVersion.textContent = APP_VERSION;
 els.btnMute.textContent = settings.muted ? 'Muted' : 'Audio On';
 els.threeTheme.value = settings.threeTheme;
 els.threeQuality.value = settings.threeQuality;
@@ -249,6 +274,19 @@ els.toggleThreeBob.checked = settings.threeCameraBob;
 els.toggleGhost.checked = settings.ghostEnabled;
 els.ghostPace.value = String(settings.ghostPaceSecPerKm);
 els.ghostPaceVal.textContent = formatPace(settings.ghostPaceSecPerKm);
+els.gpxCourse.value = ['none', 'box-hill-5k', 'rolling-parkrun-5k', 'alpine-repeats-4k'].includes(
+  settings.gpxCourseId,
+)
+  ? settings.gpxCourseId
+  : 'none';
+els.toggleGpxAutoIncline.checked = settings.gpxAutoIncline;
+
+const elevationProfile = new ElevationProfileWidget(els.gpxProfileBar);
+const routeMiniMap = new RouteMiniMapWidget(els.gpxMinimap);
+let activeGpxRoute = null;
+let lastAnnouncedGradePct = 0;
+let upcomingCueText = '';
+let lastCueClearedAtMs = 0;
 
 if (!navigator.bluetooth) {
   els.bleWarning.textContent =
@@ -421,13 +459,26 @@ async function setViewMode(mode) {
   els.btnMute.classList.toggle('hidden', isThree);
   els.btnLockBase.classList.toggle('hidden', isThree);
   els.ghostPill.classList.toggle('hidden', !isThree || !settings.ghostEnabled);
+  els.perfHud.classList.toggle('hidden', !isThree || !settings.showPerfHud);
+  if (isThree && activeGpxRoute) {
+    els.gpxProfileBar.classList.remove('hidden');
+    els.gpxMinimap.classList.remove('hidden');
+  } else {
+    els.gpxProfileBar.classList.add('hidden');
+    els.gpxMinimap.classList.add('hidden');
+  }
 }
 
 els.btnViewYoutube.addEventListener('click', () => setViewMode('youtube'));
 els.btnViewLocal.addEventListener('click', () => setViewMode('local'));
 els.btnViewThree.addEventListener('click', () => setViewMode('three'));
 
-// Phase 2A 3D World controls
+// Phase 2A 3D World & Perf HUD controls
+threeView.addEventListener('perfupdate', (e) => {
+  const { fps, frameMs, calls, quality } = e.detail;
+  els.perfHud.textContent = `${fps} fps · ${frameMs.toFixed(1)} ms · ${calls} draws · ${quality.toUpperCase()}`;
+});
+
 threeView.addEventListener('ghostupdate', (e) => {
   const { enabled, gapM } = e.detail;
   els.ghostPill.classList.toggle('hidden', settings.activeView !== 'three' || !enabled);
@@ -477,6 +528,62 @@ els.ghostPace.addEventListener('input', () => {
   settings.ghostPaceSecPerKm = paceSec;
   els.ghostPaceVal.textContent = formatPace(paceSec);
   threeView.setGhostConfig({ paceSecPerKm: paceSec });
+  saveSettings(settings);
+});
+
+async function applyGpxRoute(route, { switchToThree = true, courseId = 'none', label = '' } = {}) {
+  activeGpxRoute = route || null;
+  lastAnnouncedGradePct = 0;
+  upcomingCueText = '';
+  threeView.setGpxRoute(activeGpxRoute);
+  elevationProfile.setRoute(activeGpxRoute);
+  routeMiniMap.setRoute(activeGpxRoute);
+  els.gpxFileName.textContent = label || (activeGpxRoute ? activeGpxRoute.name : 'Endless Corridor');
+  settings.gpxCourseId = courseId;
+  saveSettings(settings);
+
+  if (activeGpxRoute && switchToThree && settings.activeView !== 'three') {
+    await setViewMode('three');
+  } else if (settings.activeView === 'three' && activeGpxRoute) {
+    els.gpxProfileBar.classList.remove('hidden');
+    els.gpxMinimap.classList.remove('hidden');
+  } else {
+    els.gpxProfileBar.classList.add('hidden');
+    els.gpxMinimap.classList.add('hidden');
+  }
+}
+
+els.gpxCourse.addEventListener('change', () => {
+  const id = els.gpxCourse.value;
+  if (id === 'none') {
+    applyGpxRoute(null, { switchToThree: false, courseId: 'none', label: 'Endless Corridor' });
+    return;
+  }
+  const route = getBuiltinRoute(id);
+  if (route) {
+    applyGpxRoute(route, { switchToThree: true, courseId: id, label: route.name });
+  }
+});
+
+els.btnPickGpx.addEventListener('click', () => els.gpxFileInput.click());
+els.gpxFileInput.addEventListener('change', async () => {
+  const file = els.gpxFileInput.files?.[0];
+  if (!file) {
+    return;
+  }
+  try {
+    const xml = await file.text();
+    const cleanName = file.name.replace(/\.gpx$/i, '');
+    const route = buildRouteFromGpx(xml, cleanName, 'custom');
+    els.gpxCourse.value = 'none';
+    await applyGpxRoute(route, { switchToThree: true, courseId: 'none', label: file.name });
+  } catch (err) {
+    els.gpxFileName.textContent = err.message || 'Invalid GPX file';
+  }
+});
+
+els.toggleGpxAutoIncline.addEventListener('change', () => {
+  settings.gpxAutoIncline = els.toggleGpxAutoIncline.checked;
   saveSettings(settings);
 });
 
@@ -586,6 +693,12 @@ els.toggleHrZoneBar.addEventListener('change', () => {
 els.toggleVoiceCoach.addEventListener('change', () => {
   settings.voiceCoachEnabled = els.toggleVoiceCoach.checked;
   voiceCoach.setEnabled(settings.voiceCoachEnabled);
+  saveSettings(settings);
+});
+
+els.togglePerfHud.addEventListener('change', () => {
+  settings.showPerfHud = els.togglePerfHud.checked;
+  els.perfHud.classList.toggle('hidden', settings.activeView !== 'three' || !settings.showPerfHud);
   saveSettings(settings);
 });
 
@@ -747,6 +860,32 @@ setInterval(() => {
   viewManager.update(snap, dt);
   voiceCoach.onTelemetry(snap);
 
+  let gpxSample = null;
+  if (activeGpxRoute) {
+    gpxSample = sampleRouteAtDistance(activeGpxRoute, snap.distanceM, { loop: true });
+    if (settings.gpxAutoIncline && snap.source !== 'ftms') {
+      const targetInc = Math.round(Math.min(15, Math.max(0, gpxSample.gradePct)) * 2) / 2;
+      if (Math.abs(snap.inclinePct - targetInc) >= 0.5) {
+        bus.setInclinePct(targetInc);
+        snap.inclinePct = targetInc;
+      }
+    }
+    if (snap.recordingState === 'running') {
+      const alert = computeUpcomingGradeAlert(activeGpxRoute, snap.distanceM, {
+        lookaheadM: 60,
+        windowM: 40,
+        lastAnnouncedPct: lastAnnouncedGradePct,
+        minDeltaPct: 1.0,
+      });
+      if (alert.shouldPrompt) {
+        lastAnnouncedGradePct = alert.targetInclinePct;
+        upcomingCueText = `In 60 m: ${alert.targetInclinePct.toFixed(1)}%`;
+        lastCueClearedAtMs = Date.now() + 8000;
+        voiceCoach.onInclinePrompt(alert.promptText);
+      }
+    }
+  }
+
   if (snap.recordingState === 'running') {
     recordAccumSec += dt;
     if (recordAccumSec >= 1.0) {
@@ -757,8 +896,8 @@ setInterval(() => {
         speedMps: snap.speedMps,
         cadenceSpm: snap.cadenceSpm,
         heartRateBpm: snap.heartRateBpm,
-        altitudeM: snap.elevationGainM,
-        gradePct: snap.inclinePct,
+        altitudeM: gpxSample ? gpxSample.eleM : snap.elevationGainM,
+        gradePct: gpxSample ? gpxSample.gradePct : snap.inclinePct,
       });
     }
   }
@@ -767,10 +906,45 @@ setInterval(() => {
   if (hudAccumSec >= 0.25) {
     hudAccumSec = 0;
     renderHud(snap);
+    if (activeGpxRoute && gpxSample && settings.activeView === 'three') {
+      const ghost = updateGhostPacer({
+        runnerDistanceM: snap.distanceM,
+        targetPaceSecPerKm: settings.ghostPaceSecPerKm,
+        elapsedSec: snap.elapsedSec,
+        enabled: settings.ghostEnabled,
+      });
+      const ghostSmp = settings.ghostEnabled
+        ? sampleRouteAtDistance(activeGpxRoute, ghost.ghostDistanceM, { loop: true })
+        : null;
+      elevationProfile.update({
+        distanceM: snap.distanceM,
+        eleM: gpxSample.eleM,
+        gradePct: gpxSample.gradePct,
+        ghostDistanceM: ghost.ghostDistanceM,
+        ghostEleM: ghostSmp ? ghostSmp.eleM : null,
+        ghostEnabled: settings.ghostEnabled,
+        upcomingCue: Date.now() < lastCueClearedAtMs ? upcomingCueText : '',
+      });
+      routeMiniMap.update({
+        distanceM: snap.distanceM,
+        ghostDistanceM: ghost.ghostDistanceM,
+        ghostEnabled: settings.ghostEnabled,
+      });
+    }
   }
 }, 100);
 
-// Mount initial view & register Service Worker
+// Mount initial view, restore GPX course if set, & register Service Worker
+if (settings.gpxCourseId && settings.gpxCourseId !== 'none') {
+  const savedRoute = getBuiltinRoute(settings.gpxCourseId);
+  if (savedRoute) {
+    applyGpxRoute(savedRoute, {
+      switchToThree: false,
+      courseId: settings.gpxCourseId,
+      label: savedRoute.name,
+    });
+  }
+}
 const initialView = ['youtube', 'local', 'three'].includes(settings.activeView)
   ? settings.activeView
   : 'youtube';

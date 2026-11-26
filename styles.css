@@ -214,13 +214,91 @@ body {
   border-color: rgba(56, 189, 248, 0.45);
 }
 
-/* Optional HR Zone Strip */
-.hr-zone-bar {
+/* Stacked Overlays above Bottom HUD */
+.hud-stack {
   position: absolute;
   left: 14px;
   right: 14px;
   bottom: 102px;
   z-index: 18;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+
+/* 2D GPX Elevation Profile Bar */
+.gpx-profile-bar {
+  padding: 8px 12px 6px;
+  border-radius: 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(12px);
+}
+
+.gpx-bar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 4px;
+  font-size: 0.8rem;
+}
+
+.gpx-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.gpx-name {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.gpx-grade-chip {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  background: rgba(56, 189, 248, 0.18);
+  color: #bae6fd;
+}
+
+.gpx-grade-chip.climb {
+  background: rgba(251, 191, 36, 0.25);
+  color: #fde68a;
+}
+
+.gpx-grade-chip.descent {
+  background: rgba(52, 211, 153, 0.22);
+  color: #a7f3d0;
+}
+
+.gpx-cue-chip {
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-weight: 700;
+  background: rgba(249, 115, 22, 0.28);
+  border: 1px solid rgba(251, 146, 60, 0.6);
+  color: #ffedd5;
+}
+
+.gpx-meta {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.gpx-svg {
+  width: 100%;
+  height: 52px;
+  display: block;
+}
+
+/* Optional HR Zone Strip */
+.hr-zone-bar {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
   gap: 6px;
@@ -635,6 +713,54 @@ input[type="range"] {
   border-color: rgba(251, 191, 36, 0.45);
 }
 
+.perf-hud {
+  position: absolute;
+  top: 64px;
+  left: 14px;
+  z-index: 19;
+  padding: 6px 12px;
+  border-radius: 10px;
+  background: rgba(11, 16, 32, 0.78);
+  border: 1px solid var(--border);
+  color: #bae6fd;
+  font-size: 0.78rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  backdrop-filter: blur(10px);
+  pointer-events: none;
+}
+
+.gpx-minimap {
+  position: absolute;
+  top: 64px;
+  right: 14px;
+  width: 136px;
+  height: 136px;
+  z-index: 19;
+  border-radius: 14px;
+  background: rgba(11, 16, 32, 0.78);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(10px);
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.minimap-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.drawer-version {
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
 @media (max-width: 900px) {
   .bottom-hud {
     flex-direction: column;
@@ -643,7 +769,7 @@ input[type="range"] {
   .metrics-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
-  .hr-zone-bar {
+  .hud-stack {
     bottom: 166px;
   }
 }
