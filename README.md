@@ -2,10 +2,11 @@
 
 A zero-bundler, offline-capable Progressive Web App (PWA) for indoor treadmill running on a **Lenovo Duet** (ChromeOS), built in incremental phases:
 
-1. **Phase 1 (Current):** Web Bluetooth telemetry (**Zwift RunPod** `0x1814` + **BT HR Chest Strap** `0x180D` or **Garmin FR 245** *Virtual Run*), speed-synced **YouTube POV** (Premium Lite compatible, with `0.25×` hysteresis) & **Local MP4/WebM** (continuous smooth scaling), manual incline logging, optional HR zone bar & 1 km voice splits, Screen Wake Lock, and Garmin/Strava/Intervals.icu **`.FIT` + HRV export** with post-run Roger Black console distance reconciliation.
-2. **Phase 2A / 2B (Planned):** Lightweight Three.js low-poly procedural corridor + real `.gpx` 3D routes & audio incline prompts.
-3. **Phase 3 / 3B (Planned):** Non-invasive **JZK ESP-32S** BLE FTMS (`0x1826`) speed + deck incline bridge (`KY-003`/`KY-033` + `GY-521` IMU) + optional **ESP32-4848S040** console HMI.
-4. **Phase 4 (Planned):** Closed-loop speed automation after console PCB & incline rocker multimeter inspection.
+1. **Phase 1 (Complete):** Web Bluetooth telemetry (**Zwift RunPod** `0x1814` + **BT HR Chest Strap** `0x180D` or **Garmin FR 245** *Virtual Run*), speed-synced **YouTube POV** (Premium Lite compatible, with `0.25×` hysteresis) & **Local MP4/WebM** (continuous smooth scaling), manual incline logging, optional HR zone bar & 1 km voice splits, Screen Wake Lock, and Garmin/Strava/Intervals.icu **`.FIT` + HRV export** with post-run Roger Black console distance reconciliation.
+2. **Phase 2A (Complete):** Offline lightweight **Three.js 3D World** view tuned for Lenovo Duet (`devicePixelRatio <= 1`, `< 15` draw calls via `InstancedMesh`, 3 themes: *Forest Trail*, *Coastal Sunset*, *Synthwave Grid*, dynamic incline road pitch, 500 m milestone arches, toggleable stride bob, and Ghost Pacer).
+3. **Phase 2B (Planned):** Real-world `.gpx` 3D routes + 2D elevation profile + Web Speech incline callouts.
+4. **Phase 3 / 3B (Planned):** Non-invasive **JZK ESP-32S** BLE FTMS (`0x1826`) speed + deck incline bridge (`KY-003`/`KY-033` + `GY-521` IMU) + optional **ESP32-4848S040** console HMI.
+5. **Phase 4 (Planned):** Closed-loop speed automation after console PCB & incline rocker multimeter inspection.
 
 ---
 

@@ -614,6 +614,27 @@ input[type="range"] {
   flex-wrap: wrap;
 }
 
+/* Phase 2A Three.js 3D View */
+.three-stage {
+  background: #070b18;
+}
+
+.three-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.ghost-pill.ahead {
+  color: var(--good);
+  border-color: rgba(52, 211, 153, 0.45);
+}
+
+.ghost-pill.behind {
+  color: var(--warn);
+  border-color: rgba(251, 191, 36, 0.45);
+}
+
 @media (max-width: 900px) {
   .bottom-hud {
     flex-direction: column;

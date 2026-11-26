@@ -1,4 +1,4 @@
-const CACHE_NAME = 'runsync-v2';
+const CACHE_NAME = 'runsync-v3';
 
 const APP_SHELL = [
   './',
@@ -6,6 +6,7 @@ const APP_SHELL = [
   './styles.css',
   './manifest.webmanifest',
   './assets/icon.svg',
+  './vendor/three.module.min.js',
   './src/main.js',
   './src/telemetry/telemetry-bus.js',
   './src/telemetry/rsc-client.js',
@@ -14,6 +15,8 @@ const APP_SHELL = [
   './src/views/view-manager.js',
   './src/views/youtube-view.js',
   './src/views/local-video-view.js',
+  './src/views/threejs-math.js',
+  './src/views/threejs-view.js',
   './src/export/fit-encoder.js',
   './src/audio/voice-coach.js',
 ];

@@ -10,6 +10,7 @@ import { SimAdapter } from './telemetry/sim-adapter.js';
 import { ViewManager } from './views/view-manager.js';
 import { YOUTUBE_PRESETS, YouTubeView } from './views/youtube-view.js';
 import { LocalVideoView } from './views/local-video-view.js';
+import { ThreeJsView } from './views/threejs-view.js';
 import { RunRecorder } from './export/fit-encoder.js';
 import { VoiceCoach } from './audio/voice-coach.js';
 
@@ -25,6 +26,11 @@ const DEFAULT_SETTINGS = {
   youtubeVideoId: YOUTUBE_PRESETS[0].id,
   activeView: 'youtube',
   muted: true,
+  threeTheme: 'forest',
+  threeQuality: 'low',
+  threeCameraBob: true,
+  ghostEnabled: true,
+  ghostPaceSecPerKm: 330,
 };
 
 const LEGACY_PRESET_IDS = new Set([
@@ -76,8 +82,16 @@ const viewStage = document.getElementById('view-stage');
 const viewManager = new ViewManager(viewStage);
 const ytView = new YouTubeView({ videoId: settings.youtubeVideoId });
 const localView = new LocalVideoView();
+const threeView = new ThreeJsView({
+  theme: settings.threeTheme,
+  quality: settings.threeQuality,
+  cameraBob: settings.threeCameraBob,
+  ghostEnabled: settings.ghostEnabled,
+  ghostPaceSecPerKm: settings.ghostPaceSecPerKm,
+});
 viewManager.register('youtube', ytView);
 viewManager.register('local', localView);
+viewManager.register('three', threeView);
 viewManager.setMuted(settings.muted);
 viewManager.setBaseSpeedKph(settings.baseSpeedKph);
 
@@ -88,8 +102,10 @@ const els = {
   chipHr: document.getElementById('chip-hr'),
   chipHrLabel: document.getElementById('chip-hr-label'),
   ratePill: document.getElementById('rate-pill'),
+  ghostPill: document.getElementById('ghost-pill'),
   btnViewYoutube: document.getElementById('btn-view-youtube'),
   btnViewLocal: document.getElementById('btn-view-local'),
+  btnViewThree: document.getElementById('btn-view-three'),
   btnMute: document.getElementById('btn-mute'),
   btnLockBase: document.getElementById('btn-lock-base'),
   btnDrawerToggle: document.getElementById('btn-drawer-toggle'),
@@ -137,6 +153,13 @@ const els = {
   baseSpeed: document.getElementById('base-speed'),
   baseSpeedVal: document.getElementById('base-speed-val'),
   btnDrawerLockBase: document.getElementById('btn-drawer-lock-base'),
+
+  threeTheme: document.getElementById('three-theme'),
+  threeQuality: document.getElementById('three-quality'),
+  toggleThreeBob: document.getElementById('toggle-three-bob'),
+  toggleGhost: document.getElementById('toggle-ghost'),
+  ghostPace: document.getElementById('ghost-pace'),
+  ghostPaceVal: document.getElementById('ghost-pace-val'),
 
   calFactorVal: document.getElementById('cal-factor-val'),
   btnCalReset: document.getElementById('btn-cal-reset'),
@@ -220,6 +243,12 @@ els.toggleHrZoneBar.checked = settings.showHrZoneBar;
 els.hrZoneBar.classList.toggle('hidden', !settings.showHrZoneBar);
 els.toggleVoiceCoach.checked = settings.voiceCoachEnabled;
 els.btnMute.textContent = settings.muted ? 'Muted' : 'Audio On';
+els.threeTheme.value = settings.threeTheme;
+els.threeQuality.value = settings.threeQuality;
+els.toggleThreeBob.checked = settings.threeCameraBob;
+els.toggleGhost.checked = settings.ghostEnabled;
+els.ghostPace.value = String(settings.ghostPaceSecPerKm);
+els.ghostPaceVal.textContent = formatPace(settings.ghostPaceSecPerKm);
 
 if (!navigator.bluetooth) {
   els.bleWarning.textContent =
@@ -384,12 +413,72 @@ async function setViewMode(mode) {
   await viewManager.switchTo(mode);
   settings.activeView = mode;
   saveSettings(settings);
+  const isThree = mode === 'three';
   els.btnViewYoutube.classList.toggle('active', mode === 'youtube');
   els.btnViewLocal.classList.toggle('active', mode === 'local');
+  els.btnViewThree.classList.toggle('active', isThree);
+  els.ratePill.classList.toggle('hidden', isThree);
+  els.btnMute.classList.toggle('hidden', isThree);
+  els.btnLockBase.classList.toggle('hidden', isThree);
+  els.ghostPill.classList.toggle('hidden', !isThree || !settings.ghostEnabled);
 }
 
 els.btnViewYoutube.addEventListener('click', () => setViewMode('youtube'));
 els.btnViewLocal.addEventListener('click', () => setViewMode('local'));
+els.btnViewThree.addEventListener('click', () => setViewMode('three'));
+
+// Phase 2A 3D World controls
+threeView.addEventListener('ghostupdate', (e) => {
+  const { enabled, gapM } = e.detail;
+  els.ghostPill.classList.toggle('hidden', settings.activeView !== 'three' || !enabled);
+  els.ghostPill.classList.remove('ahead', 'behind');
+  if (!enabled) {
+    return;
+  }
+  const rounded = Math.round(Math.abs(gapM));
+  if (rounded < 1) {
+    els.ghostPill.textContent = 'Ghost: Level';
+  } else if (gapM > 0) {
+    els.ghostPill.textContent = `Ghost +${rounded} m`;
+    els.ghostPill.classList.add('behind');
+  } else {
+    els.ghostPill.textContent = `Ahead +${rounded} m`;
+    els.ghostPill.classList.add('ahead');
+  }
+});
+
+els.threeTheme.addEventListener('change', () => {
+  settings.threeTheme = els.threeTheme.value;
+  threeView.setTheme(settings.threeTheme);
+  saveSettings(settings);
+});
+
+els.threeQuality.addEventListener('change', () => {
+  settings.threeQuality = els.threeQuality.value;
+  threeView.setQuality(settings.threeQuality);
+  saveSettings(settings);
+});
+
+els.toggleThreeBob.addEventListener('change', () => {
+  settings.threeCameraBob = els.toggleThreeBob.checked;
+  threeView.setCameraBob(settings.threeCameraBob);
+  saveSettings(settings);
+});
+
+els.toggleGhost.addEventListener('change', () => {
+  settings.ghostEnabled = els.toggleGhost.checked;
+  threeView.setGhostConfig({ enabled: settings.ghostEnabled });
+  els.ghostPill.classList.toggle('hidden', settings.activeView !== 'three' || !settings.ghostEnabled);
+  saveSettings(settings);
+});
+
+els.ghostPace.addEventListener('input', () => {
+  const paceSec = Number(els.ghostPace.value);
+  settings.ghostPaceSecPerKm = paceSec;
+  els.ghostPaceVal.textContent = formatPace(paceSec);
+  threeView.setGhostConfig({ paceSecPerKm: paceSec });
+  saveSettings(settings);
+});
 
 els.btnMute.addEventListener('click', () => {
   settings.muted = !settings.muted;
@@ -682,7 +771,10 @@ setInterval(() => {
 }, 100);
 
 // Mount initial view & register Service Worker
-setViewMode(settings.activeView === 'local' ? 'local' : 'youtube').catch(() => {});
+const initialView = ['youtube', 'local', 'three'].includes(settings.activeView)
+  ? settings.activeView
+  : 'youtube';
+setViewMode(initialView).catch(() => {});
 renderHud(bus.getSnapshot());
 updateRunButtons(bus.state.recordingState);
 

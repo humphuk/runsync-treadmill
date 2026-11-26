@@ -31,12 +31,14 @@
           <span id="chip-hr-label">HR: Off</span>
         </button>
         <span id="rate-pill" class="rate-pill" title="Current video playback rate">1.00×</span>
+        <span id="ghost-pill" class="rate-pill ghost-pill hidden" title="Ghost Pacer gap">Ghost: 0 m</span>
       </div>
 
       <div class="top-right">
         <div class="segmented" role="group" aria-label="View engine">
           <button type="button" id="btn-view-youtube" class="seg-btn active">YouTube</button>
           <button type="button" id="btn-view-local" class="seg-btn">Local MP4</button>
+          <button type="button" id="btn-view-three" class="seg-btn">3D World</button>
         </div>
         <button type="button" id="btn-mute" class="icon-btn" title="Toggle video mute">Muted</button>
         <button type="button" id="btn-lock-base" class="icon-btn" title="Lock current speed as 1.0x video speed">Lock 1.0×</button>
@@ -184,6 +186,37 @@
           <button type="button" id="btn-drawer-lock-base" class="btn btn-secondary full-width">
             Lock Current Speed as 1.0×
           </button>
+        </section>
+
+        <section class="drawer-section">
+          <h3>3D World (Phase 2A)</h3>
+          <label class="field">
+            <span>Theme</span>
+            <select id="three-theme">
+              <option value="forest">Forest Trail</option>
+              <option value="coastal">Coastal Sunset</option>
+              <option value="synthwave">Synthwave Grid</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>GPU Quality</span>
+            <select id="three-quality">
+              <option value="low">Low (Duet 60fps)</option>
+              <option value="medium">Medium</option>
+            </select>
+          </label>
+          <label class="check-row">
+            <input type="checkbox" id="toggle-three-bob" checked />
+            <span>Subtle stride camera bob</span>
+          </label>
+          <label class="check-row">
+            <input type="checkbox" id="toggle-ghost" checked />
+            <span>Ghost Pacer</span>
+          </label>
+          <label class="range-field">
+            <span>Ghost Target Pace: <strong id="ghost-pace-val">5:30</strong> /km</span>
+            <input type="range" id="ghost-pace" min="210" max="480" step="5" value="330" />
+          </label>
         </section>
 
         <section class="drawer-section">
